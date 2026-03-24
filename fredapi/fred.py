@@ -1,6 +1,7 @@
 
 import os
 import sys
+import time
 import xml.etree.ElementTree as ET
 if sys.version_info[0] >= 3:
     import urllib.request as url_request
@@ -17,6 +18,7 @@ urlopen = url_request.urlopen
 quote_plus = url_parse.quote_plus
 urlencode = url_parse.urlencode
 HTTPError = url_error.HTTPError
+URLError = url_error.URLError
 
 class Fred:
     earliest_realtime_start = '1776-07-04'
@@ -28,7 +30,8 @@ class Fred:
     def __init__(self,
                  api_key=None,
                  api_key_file=None,
-                 proxies=None):
+                 proxies=None,
+                 max_retries=3):
         """
         Initialize the Fred class that provides useful functions to query the Fred dataset. You need to specify a valid
         API key in one of 3 ways: pass the string via api_key, or set api_key_file to a file with the api key in the
@@ -42,6 +45,8 @@ class Fred:
             Path to a file containing the api key.
         proxies : dict
             Proxies specifications: a dictionary mapping protocol names (e.g. 'http', 'https') to proxy URLs. If not provided, environment variables 'HTTP_PROXY', 'HTTPS_PROXY' are used.
+        max_retries : int
+            Maximum number of retries for transient network errors (default 3).
 
         """
         self.api_key = None
@@ -70,29 +75,62 @@ class Fred:
                 proxies = {'http': http_proxy, 'https': https_proxy}
 
         self.proxies = proxies
+        self.max_retries = max_retries
 
         if self.proxies:
             opener = url_request.build_opener(url_request.ProxyHandler(self.proxies))
             url_request.install_opener(opener)
+
+    @staticmethod
+    def _sanitize_url(url):
+        """Remove the api_key parameter from a URL for safe error messages."""
+        import re
+        return re.sub(r'[&?]api_key=[^&]*', '', url)
 
     def __fetch_data(self, url):
         """
         helper function for fetching data given a request URL
         """
         url += '&api_key=' + self.api_key
-        try:
-            response = urlopen(url)
-            root = ET.fromstring(response.read())
-        except HTTPError as exc:
-            root = ET.fromstring(exc.read())
-            raise ValueError(root.get('message'))
-        return root
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                response = urlopen(url)
+                root = ET.fromstring(response.read())
+                return root
+            except HTTPError as exc:
+                code = exc.code
+                if code == 429 or code >= 500:
+                    last_error = exc
+                    if attempt < self.max_retries - 1:
+                        time.sleep(2 ** attempt)
+                        continue
+                    raise ValueError(
+                        'HTTP Error %d when fetching URL: %s' % (code, self._sanitize_url(url))
+                    )
+                root = ET.fromstring(exc.read())
+                raise ValueError(root.get('message'))
+            except URLError as exc:
+                last_error = exc
+                if attempt < self.max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise ValueError(
+                    'URL Error when fetching URL: %s - %s' % (self._sanitize_url(url), str(exc.reason))
+                )
+        raise last_error
 
     def _parse(self, date_str, format='%Y-%m-%d'):
         """
         helper function for parsing FRED date string into datetime
         """
-        rv = pd.to_datetime(date_str, format=format)
+        if format is not None:
+            try:
+                rv = pd.to_datetime(date_str, format=format)
+            except (ValueError, TypeError):
+                rv = pd.to_datetime(date_str)
+        else:
+            rv = pd.to_datetime(date_str)
         if hasattr(rv, 'to_pydatetime'):
             rv = rv.to_pydatetime()
         return rv
@@ -113,9 +151,12 @@ class Fred:
         """
         url = "%s/series?series_id=%s" % (self.root_url, series_id)
         root = self.__fetch_data(url)
-        if root is None or not len(root):
+        if root is None:
             raise ValueError('No info exists for series id: ' + series_id)
-        info = pd.Series(list(root)[0].attrib)
+        children = list(root)
+        if not children:
+            raise ValueError('No info exists for series id: ' + series_id)
+        info = pd.Series(children[0].attrib)
         return info
 
     def get_series(self, series_id, observation_start=None, observation_end=None, **kwargs):
@@ -154,6 +195,8 @@ class Fred:
         data = {}
         for child in root:
             val = child.get('value')
+            if val is None:
+                continue
             if val == self.nan_char:
                 val = float('NaN')
             else:
@@ -252,26 +295,38 @@ class Fred:
                                                                                          series_id,
                                                                                          realtime_start,
                                                                                          realtime_end)
-        root = self.__fetch_data(url)
-        if root is None:
-            raise ValueError('No data exists for series id: ' + series_id)
         data = {}
         i = 0
-        for child in root:
-            val = child.get('value')
-            if val == self.nan_char:
-                val = float('NaN')
-            else:
-                val = float(val)
-            realtime_start = self._parse(child.get('realtime_start'))
-            # realtime_end = self._parse(child.get('realtime_end'))
-            date = self._parse(child.get('date'))
+        offset = 0
+        while True:
+            page_url = url + '&offset=%d' % offset
+            root = self.__fetch_data(page_url)
+            if root is None:
+                break
+            for child in root:
+                val = child.get('value')
+                if val is None:
+                    continue
+                if val == self.nan_char:
+                    val = float('NaN')
+                else:
+                    val = float(val)
+                rt_start = self._parse(child.get('realtime_start'))
+                # realtime_end = self._parse(child.get('realtime_end'))
+                date = self._parse(child.get('date'))
 
-            data[i] = {'realtime_start': realtime_start,
-                       # 'realtime_end': realtime_end,
-                       'date': date,
-                       'value': val}
-            i += 1
+                data[i] = {'realtime_start': rt_start,
+                           # 'realtime_end': realtime_end,
+                           'date': date,
+                           'value': val}
+                i += 1
+            total_count = int(root.get('count', 0))
+            api_limit = int(root.get('limit', 100000))
+            offset += api_limit
+            if offset >= total_count:
+                break
+        if not data:
+            raise ValueError('No data exists for series id: ' + series_id)
         data = pd.DataFrame(data).T
         return data
 
@@ -296,7 +351,8 @@ class Fred:
             raise ValueError('No vintage date exists for series id: ' + series_id)
         dates = []
         for child in root:
-            dates.append(self._parse(child.text))
+            if child.text:
+                dates.append(self._parse(child.text))
         return dates
 
     def __do_series_search(self, url):
