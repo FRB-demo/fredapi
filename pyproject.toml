@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+testpaths = ["fredapi/tests"]
+# test_with_proxies.py requires FRED_API_KEY at import time
+addopts = "--ignore=fredapi/tests/test_with_proxies.py"
+
+[tool.coverage.run]
+source = ["fredapi"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
