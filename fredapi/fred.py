@@ -1,17 +1,17 @@
-
 import os
-import sys
 import xml.etree.ElementTree as ET
-if sys.version_info[0] >= 3:
-    import urllib.request as url_request
-    import urllib.parse as url_parse
-    import urllib.error as url_error
-else:
-    import urllib2 as url_request
-    import urllib as url_parse
-    import urllib2 as url_error
+import urllib.request as url_request
+import urllib.parse as url_parse
+import urllib.error as url_error
 
 import pandas as pd
+
+from fredapi.exceptions import (
+    FredAPIError,
+    FredInvalidAPIKeyError,
+    FredRateLimitError,
+    FredSeriesNotFoundError,
+)
 
 urlopen = url_request.urlopen
 quote_plus = url_parse.quote_plus
@@ -82,10 +82,31 @@ class Fred:
         url += '&api_key=' + self.api_key
         try:
             response = urlopen(url)
-            root = ET.fromstring(response.read())
+            raw = response.read()
+            try:
+                root = ET.fromstring(raw)
+            except ET.ParseError:
+                raise ValueError(
+                    "Failed to parse FRED response as XML: %s" % raw[:200]
+                )
         except HTTPError as exc:
-            root = ET.fromstring(exc.read())
-            raise ValueError(root.get('message'))
+            status_code = exc.code
+            raw_error = exc.read()
+            try:
+                error_root = ET.fromstring(raw_error)
+                error_message = error_root.get('message', '')
+            except ET.ParseError:
+                raise FredAPIError(
+                    "FRED API HTTP %d error: %s" % (status_code, raw_error[:200]),
+                    code=status_code,
+                )
+            if status_code == 429:
+                raise FredRateLimitError(error_message, code=status_code)
+            if status_code in (401, 403):
+                raise FredInvalidAPIKeyError(error_message, code=status_code)
+            if status_code == 400 and 'series does not exist' in error_message.lower():
+                raise FredSeriesNotFoundError(error_message, code=status_code)
+            raise ValueError(error_message)
         return root
 
     def _parse(self, date_str, format='%Y-%m-%d'):
@@ -94,7 +115,10 @@ class Fred:
         """
         rv = pd.to_datetime(date_str, format=format)
         if hasattr(rv, 'to_pydatetime'):
-            rv = rv.to_pydatetime()
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', FutureWarning)
+                rv = rv.to_pydatetime()
         return rv
 
     def get_series_info(self, series_id):
@@ -272,7 +296,7 @@ class Fred:
                        'date': date,
                        'value': val}
             i += 1
-        data = pd.DataFrame(data).T
+        data = pd.DataFrame.from_dict(data, orient='index')
         return data
 
     def get_series_vintage_dates(self, series_id):
@@ -322,7 +346,7 @@ class Fred:
                 data[series_id][field] = child.get(field)
 
         if num_results_returned > 0:
-            data = pd.DataFrame(data, columns=series_ids).T
+            data = pd.DataFrame.from_dict(data, orient='index')
             # parse datetime columns
             for field in ["realtime_start", "realtime_end", "observation_start", "observation_end", "last_updated"]:
                 data[field] = data[field].apply(self._parse, format=None)
