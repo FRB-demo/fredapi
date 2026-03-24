@@ -1,7 +1,7 @@
 
 # fredapi: Python API for FRED (Federal Reserve Economic Data)
 
-[![Build and test GitHub](https://github.com/mortada/fredapi/actions/workflows/main.yml/badge.svg)](https://github.com/mortada/fredapi/actions)
+[![CI](https://github.com/FRB-demo/fredapi/actions/workflows/ci.yml/badge.svg)](https://github.com/FRB-demo/fredapi/actions/workflows/ci.yml)
 [![version](https://img.shields.io/badge/version-0.5.1-success.svg)](#)
 [![PyPI Latest Release](https://img.shields.io/pypi/v/fredapi.svg)](https://pypi.org/project/fredapi/)
 [![Downloads](https://static.pepy.tech/personalized-badge/fredapi?period=total&units=international_system&left_color=grey&right_color=blue&left_text=Downloads)](https://pepy.tech/project/fredapi)
