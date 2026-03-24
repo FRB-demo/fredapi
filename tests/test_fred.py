@@ -3,10 +3,7 @@
 All tests use mocks exclusively -- no real FRED API key is required.
 """
 
-import io
 import math
-import os
-import tempfile
 from datetime import datetime
 from unittest import mock
 
