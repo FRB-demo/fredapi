@@ -1,17 +1,17 @@
-from __future__ import unicode_literals
 import sys
-if sys.version_info[0] >= 3:
-    unicode = str
-
 import io
 import unittest
-if sys.version_info < (3, 3):
-    import mock  # pylint: disable=import-error
-else:
-    from unittest import mock  # pylint: disable=import-error
+from unittest import mock
 import textwrap
+import warnings
 import fredapi
 import fredapi.fred
+from fredapi.exceptions import (
+    FredAPIError,
+    FredInvalidAPIKeyError,
+    FredRateLimitError,
+    FredSeriesNotFoundError,
+)
 
 
 # Change here if you want to make actual calls to Fred
@@ -190,10 +190,10 @@ class TestFred(unittest.TestCase):
                 <error code="400" message="Bad Request.
                 The series does not exist." />\n\n\n\n
                 ''')
-        fp = io.StringIO(unicode(error))
+        fp = io.StringIO(error)
         side_effect = fredapi.fred.HTTPError(url, 400, '', '', fp)
         self.prepare_urlopen(urlopen, side_effect=side_effect)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(FredSeriesNotFoundError):
             self.fred.get_series('invalid')
         urlopen.assert_called_with(url)
 
@@ -208,12 +208,12 @@ class TestFred(unittest.TestCase):
         <?xml version="1.0" encoding="utf-8" ?>
         <error code="400" message="{}" />\n\n\n
         '''.format(error_msg))
-        fp = io.StringIO(unicode(xml_error))
+        fp = io.StringIO(xml_error)
         side_effect = fredapi.fred.HTTPError(url, 400, 'Bad Request', '', fp)
         self.prepare_urlopen(urlopen, side_effect=side_effect)
-        with self.assertRaises(ValueError) as context:
+        with self.assertRaises(FredSeriesNotFoundError) as context:
             self.fred.get_series_info('invalid')
-        self.assertEqual(unicode(context.exception), error_msg)
+        self.assertEqual(str(context.exception), error_msg)
         urlopen.assert_called_with(url)
 
     @mock.patch('fredapi.fred.urlopen')
@@ -247,6 +247,120 @@ class TestFred(unittest.TestCase):
         PCPI01005          0        1969-01-01                       NSA''')
         for aline, eline in zip(actual.split('\n'), expected.split('\n')):
             self.assertEqual(aline.strip(), eline.strip())
+
+
+class TestFredExceptions(unittest.TestCase):
+    """Test custom exception classes and error handling."""
+
+    root_url = fredapi.Fred.root_url
+
+    def setUp(self):
+        self.fred = fredapi.Fred(api_key='secret', proxies=None)
+        self.__original_urlopen = fredapi.fred.urlopen
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_fred_api_error_on_non_xml_error_body(self, urlopen):
+        """Test that non-XML error responses produce FredAPIError."""
+        non_xml_body = b'This is not valid XML <<<>>>'
+        exc = fredapi.fred.HTTPError(
+            'http://example.com', 503, 'Service Unavailable', {}, io.BytesIO(b'')
+        )
+        exc.read = mock.Mock(return_value=non_xml_body)
+        exc.code = 503
+        urlopen.side_effect = exc
+        with self.assertRaises(FredAPIError) as context:
+            self.fred.get_series_info('TEST')
+        self.assertEqual(context.exception.code, 503)
+        self.assertIn('503', str(context.exception))
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_fred_rate_limit_error(self, urlopen):
+        """Test that HTTP 429 raises FredRateLimitError."""
+        error_xml = b'<?xml version="1.0" encoding="utf-8" ?><error code="429" message="Rate limit exceeded." />'
+        exc = fredapi.fred.HTTPError(
+            'http://example.com', 429, 'Too Many Requests', {}, io.BytesIO(b'')
+        )
+        exc.read = mock.Mock(return_value=error_xml)
+        exc.code = 429
+        urlopen.side_effect = exc
+        with self.assertRaises(FredRateLimitError) as context:
+            self.fred.get_series_info('GDP')
+        self.assertEqual(context.exception.code, 429)
+        self.assertIn('Rate limit', str(context.exception))
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_fred_invalid_api_key_error(self, urlopen):
+        """Test that HTTP 401 raises FredInvalidAPIKeyError."""
+        error_xml = b'<?xml version="1.0" encoding="utf-8" ?><error code="401" message="Invalid API key." />'
+        exc = fredapi.fred.HTTPError(
+            'http://example.com', 401, 'Unauthorized', {}, io.BytesIO(b'')
+        )
+        exc.read = mock.Mock(return_value=error_xml)
+        exc.code = 401
+        urlopen.side_effect = exc
+        with self.assertRaises(FredInvalidAPIKeyError) as context:
+            self.fred.get_series_info('GDP')
+        self.assertEqual(context.exception.code, 401)
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_fred_series_not_found_error(self, urlopen):
+        """Test that series-not-found returns FredSeriesNotFoundError."""
+        error_xml = b'<?xml version="1.0" encoding="utf-8" ?><error code="400" message="Bad Request. The series does not exist." />'
+        exc = fredapi.fred.HTTPError(
+            'http://example.com', 400, 'Bad Request', {}, io.BytesIO(b'')
+        )
+        exc.read = mock.Mock(return_value=error_xml)
+        exc.code = 400
+        urlopen.side_effect = exc
+        with self.assertRaises(FredSeriesNotFoundError):
+            self.fred.get_series('INVALID')
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_xml_parse_error_on_response(self, urlopen):
+        """Test that invalid XML in a successful response raises ValueError with message."""
+        urlopen.return_value.read.return_value = b'NOT VALID XML <<>>'
+        with self.assertRaises(ValueError) as context:
+            self.fred.get_series_info('GDP')
+        self.assertIn('Failed to parse FRED response as XML', str(context.exception))
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_exception_hierarchy(self, urlopen):
+        """Test that custom exceptions inherit correctly."""
+        error_xml = b'<?xml version="1.0" encoding="utf-8" ?><error code="429" message="Rate limit exceeded." />'
+        exc = fredapi.fred.HTTPError(
+            'http://example.com', 429, 'Too Many Requests', {}, io.BytesIO(b'')
+        )
+        exc.read = mock.Mock(return_value=error_xml)
+        exc.code = 429
+        urlopen.side_effect = exc
+        with self.assertRaises(fredapi.FredError):
+            self.fred.get_series_info('GDP')
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_no_pandas_deprecation_warnings(self, urlopen):
+        """Test that _parse does not emit deprecation warnings."""
+        obs_response = textwrap.dedent("""\
+            <?xml version="1.0" encoding="utf-8" ?>
+            <observations count="1" offset="0" limit="100000">
+              <observation realtime_start="2024-01-01" realtime_end="2024-01-01"
+                           date="2024-01-01" value="100.0"/>
+            </observations>""")
+        urlopen.return_value.read.return_value = obs_response
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            self.fred.get_series('TEST')
+            pandas_warnings = [x for x in w if 'deprecat' in str(x.message).lower()
+                               and 'pandas' in str(x.category.__module__).lower()]
+            self.assertEqual(len(pandas_warnings), 0,
+                             "Unexpected pandas deprecation warnings: %s" % pandas_warnings)
+
+    def test_exceptions_exported_from_package(self):
+        """Test that exception classes are accessible from the fredapi package."""
+        self.assertTrue(hasattr(fredapi, 'FredError'))
+        self.assertTrue(hasattr(fredapi, 'FredAPIError'))
+        self.assertTrue(hasattr(fredapi, 'FredSeriesNotFoundError'))
+        self.assertTrue(hasattr(fredapi, 'FredRateLimitError'))
+        self.assertTrue(hasattr(fredapi, 'FredInvalidAPIKeyError'))
 
 
 if __name__ == '__main__':
