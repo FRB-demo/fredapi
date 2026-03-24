@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: pytest fredapi/tests/test_fred.py -v -p no:cacheprovider
+      - run: pytest fredapi/tests/test_fred.py -v -p no:cacheprovider -p no:capture
 
   typecheck:
     runs-on: ubuntu-latest
