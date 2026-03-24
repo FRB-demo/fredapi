@@ -1,7 +1,11 @@
+from __future__ import annotations
 
 import os
 import sys
 import xml.etree.ElementTree as ET
+from datetime import datetime
+from typing import Any
+
 if sys.version_info[0] >= 3:
     import urllib.request as url_request
     import urllib.parse as url_parse
@@ -26,9 +30,9 @@ class Fred:
     root_url = 'https://api.stlouisfed.org/fred'
 
     def __init__(self,
-                 api_key=None,
-                 api_key_file=None,
-                 proxies=None):
+                 api_key: str | None = None,
+                 api_key_file: str | None = None,
+                 proxies: dict[str, str] | None = None) -> None:
         """
         Initialize the Fred class that provides useful functions to query the Fred dataset. You need to specify a valid
         API key in one of 3 ways: pass the string via api_key, or set api_key_file to a file with the api key in the
@@ -44,7 +48,7 @@ class Fred:
             Proxies specifications: a dictionary mapping protocol names (e.g. 'http', 'https') to proxy URLs. If not provided, environment variables 'HTTP_PROXY', 'HTTPS_PROXY' are used.
 
         """
-        self.api_key = None
+        self.api_key: str | None = None
         if api_key is not None:
             self.api_key = api_key
         elif api_key_file is not None:
@@ -67,7 +71,7 @@ class Fred:
         if not proxies:
             http_proxy, https_proxy = os.getenv('HTTP_PROXY'), os.getenv('HTTPS_PROXY')
             if http_proxy or https_proxy:
-                proxies = {'http': http_proxy, 'https': https_proxy}
+                proxies = {k: v for k, v in {'http': http_proxy, 'https': https_proxy}.items() if v is not None}
 
         self.proxies = proxies
 
@@ -75,10 +79,11 @@ class Fred:
             opener = url_request.build_opener(url_request.ProxyHandler(self.proxies))
             url_request.install_opener(opener)
 
-    def __fetch_data(self, url):
+    def __fetch_data(self, url: str) -> ET.Element:
         """
         helper function for fetching data given a request URL
         """
+        assert self.api_key is not None
         url += '&api_key=' + self.api_key
         try:
             response = urlopen(url)
@@ -88,16 +93,16 @@ class Fred:
             raise ValueError(root.get('message'))
         return root
 
-    def _parse(self, date_str, format='%Y-%m-%d'):
+    def _parse(self, date_str: str, format: str = '%Y-%m-%d') -> datetime:  # type: ignore[return-value]
         """
         helper function for parsing FRED date string into datetime
         """
         rv = pd.to_datetime(date_str, format=format)
         if hasattr(rv, 'to_pydatetime'):
-            rv = rv.to_pydatetime()
-        return rv
+            rv = rv.to_pydatetime()  # type: ignore[union-attr,assignment]
+        return rv  # type: ignore[return-value]
 
-    def get_series_info(self, series_id):
+    def get_series_info(self, series_id: str) -> pd.Series:
         """
         Get information about a series such as its title, frequency, observation start/end dates, units, notes, etc.
 
@@ -118,7 +123,7 @@ class Fred:
         info = pd.Series(list(root)[0].attrib)
         return info
 
-    def get_series(self, series_id, observation_start=None, observation_end=None, **kwargs):
+    def get_series(self, series_id: str, observation_start: str | datetime | None = None, observation_end: str | datetime | None = None, **kwargs: Any) -> pd.Series:
         """
         Get data for a Fred series id. This fetches the latest known data, and is equivalent to get_series_latest_release()
 
@@ -153,15 +158,15 @@ class Fred:
             raise ValueError('No data exists for series id: ' + series_id)
         data = {}
         for child in root:
-            val = child.get('value')
-            if val == self.nan_char:
+            val_str = child.get('value')
+            if val_str == self.nan_char:
                 val = float('NaN')
             else:
-                val = float(val)
-            data[self._parse(child.get('date'))] = val
+                val = float(val_str)  # type: ignore[arg-type]
+            data[self._parse(child.get('date', ''))] = val
         return pd.Series(data)
 
-    def get_series_latest_release(self, series_id):
+    def get_series_latest_release(self, series_id: str) -> pd.Series:
         """
         Get data for a Fred series id. This fetches the latest known data, and is equivalent to get_series()
 
@@ -177,7 +182,7 @@ class Fred:
         """
         return self.get_series(series_id)
 
-    def get_series_first_release(self, series_id):
+    def get_series_first_release(self, series_id: str) -> pd.Series:
         """
         Get first-release data for a Fred series id. This ignores any revision to the data series. For instance,
         The US GDP for Q1 2014 was first released to be 17149.6, and then later revised to 17101.3, and 17016.0.
@@ -198,7 +203,7 @@ class Fred:
         data = first_release.set_index('date')['value']
         return data
 
-    def get_series_as_of_date(self, series_id, as_of_date):
+    def get_series_as_of_date(self, series_id: str, as_of_date: str | datetime) -> pd.DataFrame:
         """
         Get latest data for a Fred series id as known on a particular date. This includes any revision to the data series
         before or on as_of_date, but ignores any revision on dates after as_of_date.
@@ -220,7 +225,7 @@ class Fred:
         data = df[df['realtime_start'] <= as_of_date]
         return data
 
-    def get_series_all_releases(self, series_id, realtime_start=None, realtime_end=None):
+    def get_series_all_releases(self, series_id: str, realtime_start: str | None = None, realtime_end: str | None = None) -> pd.DataFrame:
         """
         Get all data for a Fred series id including first releases and all revisions. This returns a DataFrame
         with three columns: 'date', 'realtime_start', and 'value'. For instance, the US GDP for Q4 2013 was first released
@@ -255,27 +260,26 @@ class Fred:
         root = self.__fetch_data(url)
         if root is None:
             raise ValueError('No data exists for series id: ' + series_id)
-        data = {}
+        rows: dict[int, dict[str, object]] = {}
         i = 0
         for child in root:
-            val = child.get('value')
-            if val == self.nan_char:
+            val_str = child.get('value')
+            if val_str == self.nan_char:
                 val = float('NaN')
             else:
-                val = float(val)
-            realtime_start = self._parse(child.get('realtime_start'))
+                val = float(val_str)  # type: ignore[arg-type]
+            rt_start = self._parse(child.get('realtime_start', ''))
             # realtime_end = self._parse(child.get('realtime_end'))
-            date = self._parse(child.get('date'))
+            date = self._parse(child.get('date', ''))
 
-            data[i] = {'realtime_start': realtime_start,
+            rows[i] = {'realtime_start': rt_start,
                        # 'realtime_end': realtime_end,
                        'date': date,
                        'value': val}
             i += 1
-        data = pd.DataFrame(data).T
-        return data
+        return pd.DataFrame(rows).T
 
-    def get_series_vintage_dates(self, series_id):
+    def get_series_vintage_dates(self, series_id: str) -> list[datetime]:
         """
         Get a list of vintage dates for a series. Vintage dates are the dates in history when a
         series' data values were revised or new data values were released.
@@ -294,45 +298,45 @@ class Fred:
         root = self.__fetch_data(url)
         if root is None:
             raise ValueError('No vintage date exists for series id: ' + series_id)
-        dates = []
+        dates: list[datetime] = []
         for child in root:
-            dates.append(self._parse(child.text))
+            dates.append(self._parse(child.text or ''))
         return dates
 
-    def __do_series_search(self, url):
+    def __do_series_search(self, url: str) -> tuple[pd.DataFrame | None, int]:
         """
         helper function for making one HTTP request for data, and parsing the returned results into a DataFrame
         """
         root = self.__fetch_data(url)
 
-        series_ids = []
-        data = {}
+        series_ids: list[str | None] = []
+        raw_data: dict[str | None, dict[str, str | None]] = {}
 
         num_results_returned = 0  # number of results returned in this HTTP request
-        num_results_total = int(root.get('count'))  # total number of results, this can be larger than number of results returned
+        num_results_total = int(root.get('count', '0'))  # total number of results, this can be larger than number of results returned
         for child in root:
             num_results_returned += 1
             series_id = child.get('id')
             series_ids.append(series_id)
-            data[series_id] = {"id": series_id}
+            raw_data[series_id] = {"id": series_id}
             fields = ["realtime_start", "realtime_end", "title", "observation_start", "observation_end",
                       "frequency", "frequency_short", "units", "units_short", "seasonal_adjustment",
                       "seasonal_adjustment_short", "last_updated", "popularity", "notes"]
             for field in fields:
-                data[series_id][field] = child.get(field)
+                raw_data[series_id][field] = child.get(field)
 
         if num_results_returned > 0:
-            data = pd.DataFrame(data, columns=series_ids).T
+            result = pd.DataFrame(raw_data, columns=series_ids).T
             # parse datetime columns
             for field in ["realtime_start", "realtime_end", "observation_start", "observation_end", "last_updated"]:
-                data[field] = data[field].apply(self._parse, format=None)
+                result[field] = result[field].apply(self._parse, format=None)
             # set index name
-            data.index.name = 'series id'
+            result.index.name = 'series id'
+            return result, num_results_total
         else:
-            data = None
-        return data, num_results_total
+            return None, num_results_total
 
-    def __get_search_results(self, url, limit, order_by, sort_order, filter):
+    def __get_search_results(self, url: str, limit: int, order_by: str | None, sort_order: str | None, filter: tuple[str, str] | None) -> pd.DataFrame | None:
         """
         helper function for getting search results up to specified limit on the number of results. The Fred HTTP API
         truncates to 1000 results per request, so this may issue multiple HTTP requests to obtain more available data.
@@ -376,7 +380,7 @@ class Fred:
                 data = pd.concat([data, next_data])
         return data.head(max_results_needed)
 
-    def search(self, text, limit=1000, order_by=None, sort_order=None, filter=None):
+    def search(self, text: str, limit: int = 1000, order_by: str | None = None, sort_order: str | None = None, filter: tuple[str, str] | None = None) -> pd.DataFrame:
         """
         Do a fulltext search for series in the Fred dataset. Returns information about matching series in a DataFrame.
 
@@ -404,9 +408,11 @@ class Fred:
         url = "%s/series/search?search_text=%s&" % (self.root_url,
                                                     quote_plus(text))
         info = self.__get_search_results(url, limit, order_by, sort_order, filter)
+        if info is None:
+            return pd.DataFrame()
         return info
 
-    def search_by_release(self, release_id, limit=0, order_by=None, sort_order=None, filter=None):
+    def search_by_release(self, release_id: int, limit: int = 0, order_by: str | None = None, sort_order: str | None = None, filter: tuple[str, str] | None = None) -> pd.DataFrame:
         """
         Search for series that belongs to a release id. Returns information about matching series in a DataFrame.
 
@@ -437,7 +443,7 @@ class Fred:
             raise ValueError('No series exists for release id: ' + str(release_id))
         return info
 
-    def search_by_category(self, category_id, limit=0, order_by=None, sort_order=None, filter=None):
+    def search_by_category(self, category_id: int, limit: int = 0, order_by: str | None = None, sort_order: str | None = None, filter: tuple[str, str] | None = None) -> pd.DataFrame:
         """
         Search for series that belongs to a category id. Returns information about matching series in a DataFrame.
 

@@ -18,9 +18,9 @@ import fredapi.fred
 # (https://api.stlouisfed.org/fred...)
 # Make sure you FRED_API_KEY is set up and internet works.
 fake_fred_call = True
-fred_api_key = 'secret'
+fred_api_key: str = 'secret'
 if not fake_fred_call:
-    fred_api_key = fredapi.Fred().api_key
+    fred_api_key = fredapi.Fred().api_key  # type: ignore[assignment]
 
 
 class HTTPCall:
