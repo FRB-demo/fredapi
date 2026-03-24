@@ -249,5 +249,228 @@ class TestFred(unittest.TestCase):
             self.assertEqual(aline.strip(), eline.strip())
 
 
+    # ---- Bug 1: XML iteration / empty root handling ----
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_get_series_info_empty_root(self, urlopen):
+        """Test get_series_info raises ValueError when root has no children."""
+        empty_response = textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8" ?>
+        <seriess realtime_start="2015-06-28" realtime_end="2015-06-28">
+        </seriess>''')
+        self.prepare_urlopen(urlopen, http_response=empty_response)
+        with self.assertRaises(ValueError) as context:
+            self.fred.get_series_info('INVALID')
+        self.assertIn('No info exists', str(context.exception))
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_get_series_empty_observations(self, urlopen):
+        """Test get_series returns empty Series when no observations."""
+        empty_response = textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8" ?>
+        <observations realtime_start="2015-06-28" realtime_end="2015-06-28"
+                      count="0" offset="0" limit="100000">
+        </observations>''')
+        self.prepare_urlopen(urlopen, http_response=empty_response)
+        serie = self.fred.get_series('SP500')
+        self.assertEqual(len(serie), 0)
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_get_series_vintage_dates_empty(self, urlopen):
+        """Test get_series_vintage_dates returns empty list when no dates."""
+        empty_response = textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8" ?>
+        <vintage_dates realtime_start="2015-06-28" realtime_end="2015-06-28"
+                       count="0">
+        </vintage_dates>''')
+        self.prepare_urlopen(urlopen, http_response=empty_response)
+        dates = self.fred.get_series_vintage_dates('INVALID')
+        self.assertEqual(dates, [])
+
+    # ---- Bug 2: Pagination for get_series_all_releases ----
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_get_series_all_releases_pagination(self, urlopen):
+        """Test get_series_all_releases fetches multiple pages."""
+        page1 = textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8" ?>
+        <observations realtime_start="1776-07-04" realtime_end="9999-12-31"
+                      count="4" offset="0" limit="2">
+          <observation realtime_start="2014-01-30" realtime_end="2014-02-27"
+                       date="2013-10-01" value="17102.5"/>
+          <observation realtime_start="2014-02-28" realtime_end="2014-03-26"
+                       date="2013-10-01" value="17080.7"/>
+        </observations>''')
+        page2 = textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8" ?>
+        <observations realtime_start="1776-07-04" realtime_end="9999-12-31"
+                      count="4" offset="2" limit="2">
+          <observation realtime_start="2014-03-27" realtime_end="2014-06-24"
+                       date="2013-10-01" value="17089.6"/>
+          <observation realtime_start="2014-06-25" realtime_end="9999-12-31"
+                       date="2013-10-01" value="17078.3"/>
+        </observations>''')
+        responses = [page1, page2]
+        call_count = [0]
+        def fake_urlopen(url):
+            mock_resp = mock.MagicMock()
+            mock_resp.read.return_value = responses[call_count[0]]
+            call_count[0] += 1
+            return mock_resp
+        urlopen.side_effect = fake_urlopen
+        df = self.fred.get_series_all_releases('GDP')
+        self.assertEqual(len(df), 4)
+        self.assertEqual(urlopen.call_count, 2)
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_get_series_all_releases_single_page(self, urlopen):
+        """Test get_series_all_releases with data fitting in one page."""
+        response = textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8" ?>
+        <observations realtime_start="1776-07-04" realtime_end="9999-12-31"
+                      count="2" offset="0" limit="100000">
+          <observation realtime_start="2014-01-30" realtime_end="2014-02-27"
+                       date="2013-10-01" value="17102.5"/>
+          <observation realtime_start="2014-02-28" realtime_end="2014-03-26"
+                       date="2013-10-01" value="17080.7"/>
+        </observations>''')
+        self.prepare_urlopen(urlopen, http_response=response)
+        df = self.fred.get_series_all_releases('GDP')
+        self.assertEqual(len(df), 2)
+
+    # ---- Bug 3: Date parsing robustness ----
+
+    def test_parse_standard_format(self):
+        """Test _parse handles standard YYYY-MM-DD dates."""
+        dt = self.fred._parse('2025-07-01')
+        self.assertEqual(dt.year, 2025)
+        self.assertEqual(dt.month, 7)
+        self.assertEqual(dt.day, 1)
+
+    def test_parse_nonstandard_format(self):
+        """Test _parse handles non-standard date formats via fallback."""
+        dt = self.fred._parse('7/1/2024', format='%Y-%m-%d')
+        self.assertEqual(dt.year, 2024)
+        self.assertEqual(dt.month, 7)
+        self.assertEqual(dt.day, 1)
+
+    def test_parse_no_format(self):
+        """Test _parse with format=None uses pandas default parsing."""
+        dt = self.fred._parse('2026-01-15', format=None)
+        self.assertEqual(dt.year, 2026)
+        self.assertEqual(dt.month, 1)
+        self.assertEqual(dt.day, 15)
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_get_series_future_dates(self, urlopen):
+        """Test get_series handles dates beyond 2022."""
+        response = textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8" ?>
+        <observations realtime_start="2026-01-01" realtime_end="2026-12-31"
+                      count="1" offset="0" limit="100000">
+          <observation realtime_start="2026-01-01" realtime_end="2026-12-31"
+                       date="2025-12-01" value="150.0"/>
+        </observations>''')
+        self.prepare_urlopen(urlopen, http_response=response)
+        serie = self.fred.get_series('CPI', observation_start='1/1/2025',
+                                     observation_end='12/31/2025')
+        self.assertEqual(len(serie), 1)
+        self.assertEqual(serie.iloc[0], 150.0)
+
+    # ---- Bug 4: Retry logic ----
+
+    @mock.patch('fredapi.fred.time.sleep')
+    @mock.patch('fredapi.fred.urlopen')
+    def test_retry_on_url_error(self, urlopen, mock_sleep):
+        """Test __fetch_data retries on URLError."""
+        success_response = mock.MagicMock()
+        success_response.read.return_value = textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8" ?>
+        <observations count="1" offset="0" limit="100000">
+          <observation date="2014-09-02" value="2002.28"
+                       realtime_start="2015-06-28" realtime_end="2015-06-28"/>
+        </observations>''')
+        urlopen.side_effect = [
+            fredapi.fred.URLError('DNS lookup failed'),
+            success_response
+        ]
+        serie = self.fred.get_series('SP500')
+        self.assertEqual(urlopen.call_count, 2)
+        mock_sleep.assert_called_once_with(1)
+
+    @mock.patch('fredapi.fred.time.sleep')
+    @mock.patch('fredapi.fred.urlopen')
+    def test_retry_exhausted_raises(self, urlopen, mock_sleep):
+        """Test __fetch_data raises after max retries exhausted."""
+        urlopen.side_effect = fredapi.fred.URLError('DNS lookup failed')
+        with self.assertRaises(ValueError) as context:
+            self.fred.get_series('SP500')
+        self.assertIn('URL Error', str(context.exception))
+        self.assertEqual(urlopen.call_count, 3)
+
+    @mock.patch('fredapi.fred.time.sleep')
+    @mock.patch('fredapi.fred.urlopen')
+    def test_retry_on_http_500(self, urlopen, mock_sleep):
+        """Test __fetch_data retries on HTTP 500 errors."""
+        error_500 = fredapi.fred.HTTPError(
+            'http://example.com', 500, 'Internal Server Error', {},
+            io.StringIO(unicode('<error message="Server Error"/>')))
+        success_response = mock.MagicMock()
+        success_response.read.return_value = textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8" ?>
+        <observations count="1" offset="0" limit="100000">
+          <observation date="2014-09-02" value="2002.28"
+                       realtime_start="2015-06-28" realtime_end="2015-06-28"/>
+        </observations>''')
+        urlopen.side_effect = [error_500, success_response]
+        serie = self.fred.get_series('SP500')
+        self.assertEqual(urlopen.call_count, 2)
+
+    @mock.patch('fredapi.fred.urlopen')
+    def test_no_retry_on_http_400(self, urlopen):
+        """Test __fetch_data does NOT retry on HTTP 400 errors."""
+        error_msg = 'Bad Request.  The series does not exist.'
+        xml_error = textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8" ?>
+        <error code="400" message="{}" />\n\n\n
+        '''.format(error_msg))
+        fp = io.StringIO(unicode(xml_error))
+        urlopen.side_effect = fredapi.fred.HTTPError(
+            'http://example.com', 400, 'Bad Request', '', fp)
+        with self.assertRaises(ValueError):
+            self.fred.get_series('invalid')
+        self.assertEqual(urlopen.call_count, 1)
+
+    @mock.patch('fredapi.fred.time.sleep')
+    @mock.patch('fredapi.fred.urlopen')
+    def test_retry_on_http_429(self, urlopen, mock_sleep):
+        """Test __fetch_data retries on HTTP 429 (rate limit) errors."""
+        error_429 = fredapi.fred.HTTPError(
+            'http://example.com', 429, 'Too Many Requests', {},
+            io.StringIO(unicode('<error message="Rate limited"/>')))
+        success_response = mock.MagicMock()
+        success_response.read.return_value = textwrap.dedent('''\
+        <?xml version="1.0" encoding="utf-8" ?>
+        <observations count="1" offset="0" limit="100000">
+          <observation date="2014-09-02" value="2002.28"
+                       realtime_start="2015-06-28" realtime_end="2015-06-28"/>
+        </observations>''')
+        urlopen.side_effect = [error_429, success_response]
+        serie = self.fred.get_series('SP500')
+        self.assertEqual(urlopen.call_count, 2)
+
+    def test_sanitize_url(self):
+        """Test that _sanitize_url removes the api_key from URLs."""
+        url = 'https://api.stlouisfed.org/fred/series?series_id=GDP&api_key=secret123'
+        sanitized = fredapi.Fred._sanitize_url(url)
+        self.assertNotIn('secret123', sanitized)
+        self.assertIn('series_id=GDP', sanitized)
+
+    def test_max_retries_param(self):
+        """Test max_retries parameter in constructor."""
+        fred = fredapi.Fred(api_key='test', max_retries=5)
+        self.assertEqual(fred.max_retries, 5)
+
+
 if __name__ == '__main__':
     unittest.main()
