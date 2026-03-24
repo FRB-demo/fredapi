@@ -1,7 +1,10 @@
 
 import os
 import sys
+import logging
 import xml.etree.ElementTree as ET
+import concurrent.futures
+from datetime import date
 if sys.version_info[0] >= 3:
     import urllib.request as url_request
     import urllib.parse as url_parse
@@ -12,6 +15,8 @@ else:
     import urllib2 as url_error
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 urlopen = url_request.urlopen
 quote_plus = url_parse.quote_plus
@@ -28,7 +33,8 @@ class Fred:
     def __init__(self,
                  api_key=None,
                  api_key_file=None,
-                 proxies=None):
+                 proxies=None,
+                 timeout=30):
         """
         Initialize the Fred class that provides useful functions to query the Fred dataset. You need to specify a valid
         API key in one of 3 ways: pass the string via api_key, or set api_key_file to a file with the api key in the
@@ -41,7 +47,12 @@ class Fred:
         api_key_file : str
             Path to a file containing the api key.
         proxies : dict
-            Proxies specifications: a dictionary mapping protocol names (e.g. 'http', 'https') to proxy URLs. If not provided, environment variables 'HTTP_PROXY', 'HTTPS_PROXY' are used.
+            Proxies specifications: a dictionary mapping protocol names (e.g. 'http', 'https') to proxy URLs.
+            Supports standard HTTP/HTTPS proxies. If the 'socks' module (PySocks) is available, SOCKS proxies
+            are also supported (e.g. {'http': 'socks5://localhost:1080'}). If not provided, environment
+            variables 'HTTP_PROXY', 'HTTPS_PROXY' are used.
+        timeout : int, optional
+            Timeout in seconds for HTTP requests. Default is 30 seconds.
 
         """
         self.api_key = None
@@ -70,9 +81,25 @@ class Fred:
                 proxies = {'http': http_proxy, 'https': https_proxy}
 
         self.proxies = proxies
+        self.timeout = timeout
 
         if self.proxies:
-            opener = url_request.build_opener(url_request.ProxyHandler(self.proxies))
+            handlers = []
+            # Check for SOCKS proxy support
+            socks_proxies = {k: v for k, v in self.proxies.items() if v and 'socks' in v.lower()}
+            if socks_proxies:
+                try:
+                    import socks
+                    from sockshandler import SocksiPyHandler
+                    for scheme, proxy_url in socks_proxies.items():
+                        parsed = url_parse.urlparse(proxy_url) if hasattr(url_parse, 'urlparse') else None
+                        if parsed:
+                            socks_type = socks.SOCKS5 if 'socks5' in proxy_url.lower() else socks.SOCKS4
+                            handlers.append(SocksiPyHandler(socks_type, parsed.hostname, parsed.port or 1080))
+                except ImportError:
+                    logger.warning('SOCKS proxy requested but PySocks/sockshandler not installed. Falling back to standard proxy handling.')
+            handlers.append(url_request.ProxyHandler(self.proxies))
+            opener = url_request.build_opener(*handlers)
             url_request.install_opener(opener)
 
     def __fetch_data(self, url):
@@ -81,7 +108,7 @@ class Fred:
         """
         url += '&api_key=' + self.api_key
         try:
-            response = urlopen(url)
+            response = urlopen(url, timeout=self.timeout)
             root = ET.fromstring(response.read())
         except HTTPError as exc:
             root = ET.fromstring(exc.read())
@@ -275,7 +302,7 @@ class Fred:
         data = pd.DataFrame(data).T
         return data
 
-    def get_series_vintage_dates(self, series_id):
+    def get_series_vintage_dates(self, series_id, realtime_start=None, realtime_end=None, sort_order=None):
         """
         Get a list of vintage dates for a series. Vintage dates are the dates in history when a
         series' data values were revised or new data values were released.
@@ -284,13 +311,27 @@ class Fred:
         ----------
         series_id : str
             Fred series id such as 'CPIAUCSL'
+        realtime_start : str, optional
+            Start date for filtering vintage dates (YYYY-MM-DD format)
+        realtime_end : str, optional
+            End date for filtering vintage dates (YYYY-MM-DD format)
+        sort_order : str, optional
+            Sort order: 'asc' (default) or 'desc'
 
         Returns
         -------
         dates : list
-            list of vintage dates
+            list of vintage dates as datetime objects
         """
         url = "%s/series/vintagedates?series_id=%s" % (self.root_url, series_id)
+        if realtime_start is not None:
+            url += '&realtime_start=' + realtime_start
+        if realtime_end is not None:
+            url += '&realtime_end=' + realtime_end
+        if sort_order is not None:
+            if sort_order not in ('asc', 'desc'):
+                raise ValueError("sort_order must be 'asc' or 'desc'")
+            url += '&sort_order=' + sort_order
         root = self.__fetch_data(url)
         if root is None:
             raise ValueError('No vintage date exists for series id: ' + series_id)
@@ -468,3 +509,154 @@ class Fred:
         if info is None:
             raise ValueError('No series exists for category id: ' + str(category_id))
         return info
+
+    def get_multiple_series(self, series_ids, observation_start=None, observation_end=None, **kwargs):
+        """
+        Get data for multiple Fred series ids. Returns a DataFrame with each series as a column.
+
+        Parameters
+        ----------
+        series_ids : list of str
+            List of Fred series ids such as ['GDP', 'CPIAUCSL', 'UNRATE']
+        observation_start : datetime or datetime-like str, optional
+            earliest observation date
+        observation_end : datetime or datetime-like str, optional
+            latest observation date
+        kwargs : additional parameters
+
+        Returns
+        -------
+        data : DataFrame
+            a DataFrame where each column is a series and the index is the observation date
+        """
+        if not series_ids:
+            return pd.DataFrame()
+
+        def _fetch_one(sid):
+            try:
+                return sid, self.get_series(sid, observation_start=observation_start,
+                                            observation_end=observation_end, **kwargs)
+            except Exception as e:
+                logger.warning("Failed to fetch series '%s': %s" % (sid, str(e)))
+                return sid, None
+
+        results = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(series_ids), 8)) as executor:
+            futures = {executor.submit(_fetch_one, sid): sid for sid in series_ids}
+            for future in concurrent.futures.as_completed(futures):
+                sid, data = future.result()
+                if data is not None:
+                    results[sid] = data
+                else:
+                    results[sid] = pd.Series(dtype=float)
+
+        # Preserve the original order of series_ids
+        ordered = {sid: results[sid] for sid in series_ids if sid in results}
+        return pd.concat(ordered, axis=1)
+
+    def __parse_tags(self, root):
+        """
+        helper function for parsing tag XML elements into a DataFrame
+        """
+        tags = []
+        for child in root:
+            tag_data = dict(child.attrib)
+            tags.append(tag_data)
+        if not tags:
+            return pd.DataFrame()
+        return pd.DataFrame(tags)
+
+    def get_tags(self, **kwargs):
+        """
+        Get all FRED tags. Returns a DataFrame of tags with columns like name, group_id,
+        notes, popularity, etc.
+
+        Parameters
+        ----------
+        kwargs : additional parameters
+            Any additional parameters supported by the FRED tags endpoint.
+
+        Returns
+        -------
+        tags : DataFrame
+            a DataFrame containing information about FRED tags
+        """
+        url = "%s/tags?" % self.root_url
+        if kwargs:
+            url += urlencode(kwargs) + '&'
+        root = self.__fetch_data(url)
+        return self.__parse_tags(root)
+
+    def get_related_tags(self, tag_names, **kwargs):
+        """
+        Get related FRED tags for given tag names.
+
+        Parameters
+        ----------
+        tag_names : str or list of str
+            Tag names to find related tags for. If a list, they are joined with semicolons.
+        kwargs : additional parameters
+
+        Returns
+        -------
+        tags : DataFrame
+            a DataFrame containing information about related FRED tags
+        """
+        if isinstance(tag_names, list):
+            tag_names = ';'.join(tag_names)
+        url = "%s/related_tags?tag_names=%s&" % (self.root_url, quote_plus(tag_names))
+        if kwargs:
+            url += urlencode(kwargs) + '&'
+        root = self.__fetch_data(url)
+        return self.__parse_tags(root)
+
+    def get_series_by_tag(self, tag_names, **kwargs):
+        """
+        Get series matching given tag names.
+
+        Parameters
+        ----------
+        tag_names : str or list of str
+            Tag names to search for. If a list, they are joined with semicolons.
+        kwargs : additional parameters
+
+        Returns
+        -------
+        data : DataFrame
+            a DataFrame containing information about matching FRED series
+        """
+        if isinstance(tag_names, list):
+            tag_names = ';'.join(tag_names)
+        url = "%s/tags/series?tag_names=%s" % (self.root_url, quote_plus(tag_names))
+        if kwargs:
+            url += '&' + urlencode(kwargs)
+        data, _ = self.__do_series_search(url)
+        if data is None:
+            raise ValueError('No series exists for tag names: ' + tag_names)
+        return data
+
+    def get_series_citation(self, series_id):
+        """
+        Get the citation information for a FRED series.
+
+        Parameters
+        ----------
+        series_id : str
+            Fred series id such as 'GDP'
+
+        Returns
+        -------
+        citation : str
+            The suggested citation text for the series. Built from series metadata including
+            title, source, and access date.
+        """
+        info = self.get_series_info(series_id)
+        title = info.get('title', series_id)
+        current_date = date.today().strftime('%B %d, %Y')
+        citation = (
+            'Federal Reserve Bank of St. Louis, '
+            '%s [%s], retrieved from FRED, '
+            'Federal Reserve Bank of St. Louis; '
+            'https://fred.stlouisfed.org/series/%s, %s'
+        ) % (title, series_id, series_id, current_date)
+        return citation

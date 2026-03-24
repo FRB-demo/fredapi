@@ -163,7 +163,7 @@ class TestFred(unittest.TestCase):
                              http_response=sp500_obs_call.response)
         serie = self.fred.get_series('SP500', observation_start='9/2/2014',
                                      observation_end='9/5/2014')
-        urlopen.assert_called_with(sp500_obs_call.url)
+        urlopen.assert_called_with(sp500_obs_call.url, timeout=30)
         self.assertEqual(serie.loc['9/2/2014'], 2002.28)
         self.assertEqual(len(serie), 4)
 
@@ -174,7 +174,7 @@ class TestFred(unittest.TestCase):
         http_response = payems_info_call.response
         self.prepare_urlopen(urlopen, http_response=http_response)
         info = self.fred.get_series_info('PAYEMS')
-        urlopen.assert_called_with(url)
+        urlopen.assert_called_with(url, timeout=30)
         self.assertEqual(info['title'], 'All Employees: Total Nonfarm Payrolls')
         self.assertEqual(info['frequency'], 'Monthly')
         self.assertEqual(info['frequency_short'], 'M')
@@ -195,7 +195,7 @@ class TestFred(unittest.TestCase):
         self.prepare_urlopen(urlopen, side_effect=side_effect)
         with self.assertRaises(ValueError):
             self.fred.get_series('invalid')
-        urlopen.assert_called_with(url)
+        urlopen.assert_called_with(url, timeout=30)
 
     @mock.patch('fredapi.fred.urlopen')
     def test_invalid_id_in_get_series_info(self, urlopen):
@@ -214,7 +214,7 @@ class TestFred(unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             self.fred.get_series_info('invalid')
         self.assertEqual(unicode(context.exception), error_msg)
-        urlopen.assert_called_with(url)
+        urlopen.assert_called_with(url, timeout=30)
 
     @mock.patch('fredapi.fred.urlopen')
     def test_invalid_kwarg_in_get_series(self, urlopen):
@@ -236,7 +236,7 @@ class TestFred(unittest.TestCase):
         pi_series = self.fred.search_by_release(175, limit=3,
                                                 order_by='series_id',
                                                 sort_order='asc')
-        urlopen.assert_called_with(search_call.url)
+        urlopen.assert_called_with(search_call.url, timeout=30)
         actual = str(pi_series[['popularity', 'observation_start',
                                 'seasonal_adjustment_short']])
         expected = textwrap.dedent('''\
