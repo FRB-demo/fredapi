@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+testpaths = ["tests", "fredapi/tests"]
+addopts = "--tb=short -q"
+
+[tool.coverage.run]
+source = ["fredapi"]
+omit = ["fredapi/tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
+omit = ["fredapi/tests/*"]
