@@ -4,6 +4,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.9', '3.10', '3.11', '3.12']
     steps:
@@ -12,7 +13,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: pytest fredapi/tests/test_fred.py -v
+      - run: pytest fredapi/tests/test_fred.py -v -p no:cacheprovider
 
   typecheck:
     runs-on: ubuntu-latest
