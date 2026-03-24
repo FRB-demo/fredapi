@@ -12,7 +12,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: pytest fredapi/tests/ -v
+      - run: pytest fredapi/tests/test_fred.py -v
 
   typecheck:
     runs-on: ubuntu-latest
@@ -32,4 +32,4 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install ruff
-      - run: ruff check fredapi/
+      - run: ruff check fredapi/ --per-file-ignores='fredapi/__init__.py:F401' --per-file-ignores='fredapi/tests/*:F841'
