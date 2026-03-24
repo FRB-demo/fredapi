@@ -1,14 +1,7 @@
-from __future__ import unicode_literals
-import sys
-if sys.version_info[0] >= 3:
-    unicode = str
-
 import io
+import sys
 import unittest
-if sys.version_info < (3, 3):
-    import mock  # pylint: disable=import-error
-else:
-    from unittest import mock  # pylint: disable=import-error
+from unittest import mock
 import textwrap
 import fredapi
 import fredapi.fred
@@ -18,9 +11,9 @@ import fredapi.fred
 # (https://api.stlouisfed.org/fred...)
 # Make sure you FRED_API_KEY is set up and internet works.
 fake_fred_call = True
-fred_api_key = 'secret'
+fred_api_key: str = 'secret'
 if not fake_fred_call:
-    fred_api_key = fredapi.Fred().api_key
+    fred_api_key = fredapi.Fred().api_key or ''
 
 
 class HTTPCall:
@@ -190,7 +183,7 @@ class TestFred(unittest.TestCase):
                 <error code="400" message="Bad Request.
                 The series does not exist." />\n\n\n\n
                 ''')
-        fp = io.StringIO(unicode(error))
+        fp = io.StringIO(str(error))
         side_effect = fredapi.fred.HTTPError(url, 400, '', '', fp)
         self.prepare_urlopen(urlopen, side_effect=side_effect)
         with self.assertRaises(ValueError):
@@ -208,12 +201,12 @@ class TestFred(unittest.TestCase):
         <?xml version="1.0" encoding="utf-8" ?>
         <error code="400" message="{}" />\n\n\n
         '''.format(error_msg))
-        fp = io.StringIO(unicode(xml_error))
+        fp = io.StringIO(str(xml_error))
         side_effect = fredapi.fred.HTTPError(url, 400, 'Bad Request', '', fp)
         self.prepare_urlopen(urlopen, side_effect=side_effect)
         with self.assertRaises(ValueError) as context:
             self.fred.get_series_info('invalid')
-        self.assertEqual(unicode(context.exception), error_msg)
+        self.assertEqual(str(context.exception), error_msg)
         urlopen.assert_called_with(url)
 
     @mock.patch('fredapi.fred.urlopen')
