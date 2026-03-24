@@ -5,6 +5,7 @@
 [![version](https://img.shields.io/badge/version-0.5.1-success.svg)](#)
 [![PyPI Latest Release](https://img.shields.io/pypi/v/fredapi.svg)](https://pypi.org/project/fredapi/)
 [![Downloads](https://static.pepy.tech/personalized-badge/fredapi?period=total&units=international_system&left_color=grey&right_color=blue&left_text=Downloads)](https://pepy.tech/project/fredapi)
+[![Coverage](https://img.shields.io/badge/coverage-%25-brightgreen)](#)
 
 `fredapi` is a Python API for the [FRED](http://research.stlouisfed.org/fred2/) data provided by the
 Federal Reserve Bank of St. Louis. `fredapi` provides a wrapper in python to the 
