@@ -583,7 +583,7 @@ class Fred:
         """
         url = "%s/tags?" % self.root_url
         if kwargs:
-            url += urlencode(kwargs) + '&'
+            url += urlencode(kwargs)
         root = self.__fetch_data(url)
         return self.__parse_tags(root)
 
@@ -604,9 +604,9 @@ class Fred:
         """
         if isinstance(tag_names, list):
             tag_names = ';'.join(tag_names)
-        url = "%s/related_tags?tag_names=%s&" % (self.root_url, quote_plus(tag_names))
+        url = "%s/related_tags?tag_names=%s" % (self.root_url, quote_plus(tag_names))
         if kwargs:
-            url += urlencode(kwargs) + '&'
+            url += '&' + urlencode(kwargs)
         root = self.__fetch_data(url)
         return self.__parse_tags(root)
 
