@@ -331,6 +331,49 @@ this outputs:
   </tbody>
 </table>
 
+## Advanced Usage
+
+### Fetch multiple series at once
+
+```python
+# Returns a DataFrame with each series as a column, fetched in parallel
+df = fred.get_multiple_series(['GDP', 'CPIAUCSL', 'UNRATE'])
+print(df.head())
+```
+
+### Search by tags
+
+```python
+# Get all FRED tags
+tags = fred.get_tags()
+
+# Get related tags
+related = fred.get_related_tags(['monetary aggregates', 'weekly'])
+
+# Find series by tag
+series = fred.get_series_by_tag(['gdp', 'quarterly'])
+```
+
+### Get citation
+
+```python
+citation = fred.get_series_citation('GDP')
+print(citation)
+# Output: Federal Reserve Bank of St. Louis, Gross Domestic Product [GDP],
+#         retrieved from FRED, Federal Reserve Bank of St. Louis;
+#         https://fred.stlouisfed.org/series/GDP, March 24, 2026
+```
+
+### Timeout and proxy configuration
+
+```python
+# Set a custom timeout (default is 30 seconds)
+fred = Fred(api_key='your_key', timeout=60)
+
+# Use with proxies (SOCKS proxies supported if PySocks is installed)
+fred = Fred(api_key='your_key', proxies={'https': 'http://proxy:8080'})
+```
+
 ## Dependencies
 - [pandas](http://pandas.pydata.org/)
 
