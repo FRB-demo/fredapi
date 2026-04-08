@@ -1,338 +1,208 @@
+# AI Research Assistant
 
-# fredapi: Python API for FRED (Federal Reserve Economic Data)
+A locally-deployable, RAG-powered web application for financial document Q&A. Select financial data sources (e.g., Wells Fargo quarterly earnings, annual reports), scrape and index documents, and ask questions via a chat interface with retrieval-augmented generation.
 
-[![Build and test GitHub](https://github.com/mortada/fredapi/actions/workflows/main.yml/badge.svg)](https://github.com/mortada/fredapi/actions)
-[![version](https://img.shields.io/badge/version-0.5.1-success.svg)](#)
-[![PyPI Latest Release](https://img.shields.io/pypi/v/fredapi.svg)](https://pypi.org/project/fredapi/)
-[![Downloads](https://static.pepy.tech/personalized-badge/fredapi?period=total&units=international_system&left_color=grey&right_color=blue&left_text=Downloads)](https://pepy.tech/project/fredapi)
+## Features
 
-`fredapi` is a Python API for the [FRED](http://research.stlouisfed.org/fred2/) data provided by the
-Federal Reserve Bank of St. Louis. `fredapi` provides a wrapper in python to the 
-[FRED web service](http://api.stlouisfed.org/docs/fred/), and also provides several convenient methods
-for parsing and analyzing point-in-time data (i.e. historic data revisions) from [ALFRED](http://research.stlouisfed.org/tips/alfred/)
+- **Multi-source document ingestion** — Scrape PDFs from financial data sources (Wells Fargo earnings, annual reports, etc.)
+- **RAG-powered Q&A** — Ask natural language questions answered using retrieved document context
+- **Source filtering** — Select which sources to query against
+- **Citations** — Every answer includes citations with source documents, URLs, and relevant text snippets
+- **Extensible scraper framework** — Add new data sources by implementing a simple base class
+- **Dual LLM support** — Use OpenAI API or self-hosted Ollama models
+- **Local vector storage** — ChromaDB for embeddings, SQLite for document metadata
 
-`fredapi` makes use of `pandas` and returns data to you in a `pandas` `Series` or `DataFrame`
+## Prerequisites
+
+- Python 3.11+
+- An OpenAI API key **or** [Ollama](https://ollama.ai/) installed locally
+- (Optional) Docker and Docker Compose for containerized deployment
 
 ## Installation
 
-```sh
-pip install fredapi
+1. **Clone the repository:**
+   ```bash
+   git clone <repo-url>
+   cd ai-research-assistant
+   ```
+
+2. **Create a virtual environment:**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate
+   ```
+
+3. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Configure environment:**
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your OpenAI API key (or configure Ollama)
+   ```
+
+## Configuration
+
+Edit `.env` to configure the application:
+
+```env
+# LLM Provider
+OPENAI_API_KEY=sk-your-key-here
+LLM_PROVIDER=openai          # or "ollama"
+LLM_MODEL=gpt-4o-mini        # or "llama3" for Ollama
+
+# For Ollama (uncomment):
+# LLM_BASE_URL=http://localhost:11434/v1
+
+# Embeddings
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+
+# Storage paths
+CHROMA_DB_PATH=./data/chroma_db
+SQLITE_DB_PATH=./data/metadata.db
+DOWNLOAD_PATH=./data/downloads
 ```
 
-## Basic Usage
+## Running the Application
 
-First you need an API key, you can [apply for one](https://fred.stlouisfed.org/docs/api/api_key.html) for free on the FRED website.
-Once you have your API key, you can set it in one of three ways:
+### Backend (FastAPI)
 
-* set it to the evironment variable FRED_API_KEY
-* save it to a file and use the 'api_key_file' parameter
-* pass it directly as the 'api_key' parameter
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+The API will be available at `http://localhost:8000`. API docs at `http://localhost:8000/docs`.
+
+### Frontend (Streamlit)
+
+In a separate terminal:
+
+```bash
+streamlit run frontend/streamlit_app.py --server.port 8501
+```
+
+The UI will be available at `http://localhost:8501`.
+
+### Seed Initial Data
+
+To scrape and ingest documents from all configured sources:
+
+```bash
+python scripts/seed_data.py
+```
+
+To scrape a specific source:
+
+```bash
+python scripts/seed_data.py --source wf_earnings
+```
+
+## Running Tests
+
+```bash
+# Unit tests (fast, no external dependencies)
+pytest -m unit
+
+# Component tests (may use local resources like ChromaDB)
+pytest -m component
+
+# Integration tests
+pytest -m integration
+
+# End-to-end tests
+pytest -m e2e
+
+# Smoke tests (quick health checks)
+pytest -m smoke
+
+# All tests
+pytest
+
+# With coverage
+pytest --cov=app --cov-report=html
+```
+
+## API Endpoints
+
+| Method | Endpoint                    | Description                          |
+|--------|----------------------------|--------------------------------------|
+| GET    | `/health`                  | Health check                         |
+| GET    | `/api/sources`             | List all registered data sources     |
+| POST   | `/api/query`               | Query documents using RAG            |
+| POST   | `/api/admin/scrape`        | Trigger scraping for a source        |
+| GET    | `/api/admin/store/stats`   | Vector store statistics              |
+| GET    | `/api/admin/llm/status`    | Check LLM connectivity              |
+| POST   | `/api/admin/scrape/dry-run`| Check if source URL is reachable     |
+
+### Query Example
+
+```bash
+curl -X POST http://localhost:8000/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What was Wells Fargo net income in Q4 2025?", "sources": ["wf_earnings"]}'
+```
+
+## Adding New Sources
+
+1. Create a new scraper in `app/scrapers/`:
 
 ```python
-from fredapi import Fred
-fred = Fred(api_key='insert api key here')
-data = fred.get_series('SP500')
+from app.scrapers.base_scraper import BaseScraper, ScrapedDocument
+
+class MyNewScraper(BaseScraper):
+    name = "my_source"
+    display_name = "My Data Source"
+    base_url = "https://example.com/data"
+    doc_type = "pdf"
+
+    def scrape(self) -> list[ScrapedDocument]:
+        # Implement scraping logic
+        ...
 ```
 
-## Working with data revisions
-Many economic data series contain frequent revisions. `fredapi` provides several convenient methods for handling data revisions and answering the quesion of what-data-was-known-when.
-
-In [ALFRED](http://research.stlouisfed.org/tips/alfred/) there is the concept of a *vintage* date. Basically every *observation* can have three dates associated with it: *date*, *realtime_start* and *realtime_end*. 
-
-- date: the date the value is for
-- realtime_start: the first date the value is valid
-- realitime_end: the last date the value is valid
-
-For instance, there has been three observations (data points) for the GDP of 2014 Q1:
-
-```xml
-<observation realtime_start="2014-04-30" realtime_end="2014-05-28" date="2014-01-01" value="17149.6"/>
-<observation realtime_start="2014-05-29" realtime_end="2014-06-24" date="2014-01-01" value="17101.3"/>
-<observation realtime_start="2014-06-25" realtime_end="2014-07-29" date="2014-01-01" value="17016.0"/>
-```
-
-This means the GDP value for Q1 2014 has been released three times. First release was on 4/30/2014 for a value of 17149.6, and then there have been two revisions on 5/29/2014 and 6/25/2014 for revised values of 17101.3 and 17016.0, respectively.
-
-### Get first data release only (i.e. ignore revisions)
+2. Register it in `app/scrapers/registry.py`:
 
 ```python
-data = fred.get_series_first_release('GDP')
-data.tail()
-```
-this outputs:
+from app.scrapers.my_source import MyNewScraper
 
-```sh
-date
-2013-04-01    16633.4
-2013-07-01    16857.6
-2013-10-01    17102.5
-2014-01-01    17149.6
-2014-04-01    17294.7
-Name: value, dtype: object
+def _build_registry():
+    scrapers = [
+        WFEarningsScraper(),
+        WFAnnualReportsScraper(),
+        MyNewScraper(),  # Add here
+    ]
+    return {s.name: s for s in scrapers}
 ```
 
-### Get latest data
-Note that this is the same as simply calling `get_series()`
-```python
-data = fred.get_series_latest_release('GDP')
-data.tail()
-```
-this outputs:
-```
-2013-04-01    16619.2
-2013-07-01    16872.3
-2013-10-01    17078.3
-2014-01-01    17044.0
-2014-04-01    17294.7
-dtype: float64
-```
-### Get latest data known on a given date
+3. The new source will automatically appear in the UI and API.
 
-```python
-fred.get_series_as_of_date('GDP', '6/1/2014')
-```
-this outputs:
+## Docker Deployment
 
-<table border="1" class="dataframe">
-  <thead>
-    <tr style="text-align: right;">
-      <th></th>
-      <th>date</th>
-      <th>realtime_start</th>
-      <th>value</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <th>2237</th>
-      <td> 2013-10-01 00:00:00</td>
-      <td> 2014-01-30 00:00:00</td>
-      <td> 17102.5</td>
-    </tr>
-    <tr>
-      <th>2238</th>
-      <td> 2013-10-01 00:00:00</td>
-      <td> 2014-02-28 00:00:00</td>
-      <td> 17080.7</td>
-    </tr>
-    <tr>
-      <th>2239</th>
-      <td> 2013-10-01 00:00:00</td>
-      <td> 2014-03-27 00:00:00</td>
-      <td> 17089.6</td>
-    </tr>
-    <tr>
-      <th>2241</th>
-      <td> 2014-01-01 00:00:00</td>
-      <td> 2014-04-30 00:00:00</td>
-      <td> 17149.6</td>
-    </tr>
-    <tr>
-      <th>2242</th>
-      <td> 2014-01-01 00:00:00</td>
-      <td> 2014-05-29 00:00:00</td>
-      <td> 17101.3</td>
-    </tr>
-  </tbody>
-</table>
-
-### Get all data release dates
-This returns a `DataFrame` with all the data from ALFRED
-
-```python
-df = fred.get_series_all_releases('GDP')
-df.tail()
-```
-this outputs:
-
-<table border="1" class="dataframe">
-  <thead>
-    <tr style="text-align: right;">
-      <th></th>
-      <th>date</th>
-      <th>realtime_start</th>
-      <th>value</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <th>2236</th>
-      <td> 2013-07-01 00:00:00</td>
-      <td> 2014-07-30 00:00:00</td>
-      <td> 16872.3</td>
-    </tr>
-    <tr>
-      <th>2237</th>
-      <td> 2013-10-01 00:00:00</td>
-      <td> 2014-01-30 00:00:00</td>
-      <td> 17102.5</td>
-    </tr>
-    <tr>
-      <th>2238</th>
-      <td> 2013-10-01 00:00:00</td>
-      <td> 2014-02-28 00:00:00</td>
-      <td> 17080.7</td>
-    </tr>
-    <tr>
-      <th>2239</th>
-      <td> 2013-10-01 00:00:00</td>
-      <td> 2014-03-27 00:00:00</td>
-      <td> 17089.6</td>
-    </tr>
-    <tr>
-      <th>2240</th>
-      <td> 2013-10-01 00:00:00</td>
-      <td> 2014-07-30 00:00:00</td>
-      <td> 17078.3</td>
-    </tr>
-    <tr>
-      <th>2241</th>
-      <td> 2014-01-01 00:00:00</td>
-      <td> 2014-04-30 00:00:00</td>
-      <td> 17149.6</td>
-    </tr>
-    <tr>
-      <th>2242</th>
-      <td> 2014-01-01 00:00:00</td>
-      <td> 2014-05-29 00:00:00</td>
-      <td> 17101.3</td>
-    </tr>
-    <tr>
-      <th>2243</th>
-      <td> 2014-01-01 00:00:00</td>
-      <td> 2014-06-25 00:00:00</td>
-      <td>   17016</td>
-    </tr>
-    <tr>
-      <th>2244</th>
-      <td> 2014-01-01 00:00:00</td>
-      <td> 2014-07-30 00:00:00</td>
-      <td>   17044</td>
-    </tr>
-    <tr>
-      <th>2245</th>
-      <td> 2014-04-01 00:00:00</td>
-      <td> 2014-07-30 00:00:00</td>
-      <td> 17294.7</td>
-    </tr>
-  </tbody>
-</table>
-
-### Get all vintage dates
-```python
-from __future__ import print_function
-vintage_dates = fred.get_series_vintage_dates('GDP')
-for dt in vintage_dates[-5:]:
-    print(dt.strftime('%Y-%m-%d'))
-```
-this outputs:
-```
-2014-03-27
-2014-04-30
-2014-05-29
-2014-06-25
-2014-07-30
+```bash
+docker-compose up --build
 ```
 
-### Search for data series
+This starts both the backend (port 8000) and frontend (port 8501).
 
-You can always search for data series on the FRED website. But sometimes it can be more convenient to search programmatically.
-`fredapi` provides a `search()` method that does a fulltext search and returns a `DataFrame` of results.
+## Project Structure
 
-```python
-fred.search('potential gdp').T
 ```
-this outputs:
+ai-research-assistant/
+├── app/                    # Application code
+│   ├── api/                # FastAPI routes and dependencies
+│   ├── scrapers/           # Data source scrapers
+│   ├── processing/         # PDF parsing, chunking, embeddings
+│   ├── storage/            # ChromaDB and SQLite wrappers
+│   ├── rag/                # RAG pipeline
+│   └── utils/              # Text and URL utilities
+├── frontend/               # Streamlit UI
+├── tests/                  # Test suite (unit, component, integration, e2e, smoke)
+├── scripts/                # Utility scripts
+└── data/                   # Local data (gitignored)
+```
 
-<table border="1" class="dataframe">
-  <thead>
-    <tr style="text-align: right;">
-      <th>series id</th>
-      <th>GDPPOT</th>
-      <th>NGDPPOT</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <th>frequency</th>
-      <td>Quarterly</td>
-      <td>Quarterly</td>
-    </tr>
-    <tr>
-      <th>frequency_short</th>
-      <td>Q</td>
-      <td>Q</td>
-    </tr>
-    <tr>
-      <th>id</th>
-      <td>GDPPOT</td>
-      <td>NGDPPOT</td>
-    </tr>
-    <tr>
-      <th>last_updated</th>
-      <td>2014-02-04 10:06:03-06:00</td>
-      <td>2014-02-04 10:06:03-06:00</td>
-    </tr>
-    <tr>
-      <th>notes</th>
-      <td> Real potential GDP is the CBO&#39;s estimate of the output the economy would produce with a high rate of use of its capital and labor resources. The data is adjusted to remove the effects of inflation.</td>
-      <td>None</td>
-    </tr>
-    <tr>
-      <th>observation_end</th>
-      <td>2024-10-01 00:00:00</td>
-      <td>2024-10-01 00:00:00</td>
-    </tr>
-    <tr>
-      <th>observation_start</th>
-      <td>1949-01-01 00:00:00</td>
-      <td>1949-01-01 00:00:00</td>
-    </tr>
-    <tr>
-      <th>popularity</th>
-      <td>72</td>
-      <td>61</td>
-    </tr>
-    <tr>
-      <th>realtime_end</th>
-      <td>2014-08-23 00:00:00</td>
-      <td>2014-08-23 00:00:00</td>
-    </tr>
-    <tr>
-      <th>realtime_start</th>
-      <td>2014-08-23 00:00:00</td>
-      <td>2014-08-23 00:00:00</td>
-    </tr>
-    <tr>
-      <th>seasonal_adjustment</th>
-      <td>Not Seasonally Adjusted</td>
-      <td>Not Seasonally Adjusted</td>
-    </tr>
-    <tr>
-      <th>seasonal_adjustment_short</th>
-      <td>NSA</td>
-      <td>NSA</td>
-    </tr>
-    <tr>
-      <th>title</th>
-      <td>Real Potential Gross Domestic Product</td>
-      <td>Nominal Potential Gross Domestic Product</td>
-    </tr>
-    <tr>
-      <th>units</th>
-      <td>Billions of Chained 2009 Dollars</td>
-      <td>Billions of Dollars</td>
-    </tr>
-    <tr>
-      <th>units_short</th>
-      <td>Bil. of Chn. 2009 &#36;</td>
-      <td>Bil. of &#36;</td>
-    </tr>
-  </tbody>
-</table>
+## License
 
-## Dependencies
-- [pandas](http://pandas.pydata.org/)
-
-## More Examples
-- I have a [blog post with more examples](http://mortada.net/python-api-for-fred.html) written in an `IPython` notebook
+MIT
