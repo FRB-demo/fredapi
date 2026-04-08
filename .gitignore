@@ -1,56 +1,44 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
-
-# C extensions
+*$py.class
 *.so
-
-# Distribution / packaging
-.Python
-env/
-bin/
-build/
-develop-eggs/
-dist/
-eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
 *.egg-info/
-.installed.cfg
+dist/
+build/
 *.egg
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# Virtual environments
+venv/
+.venv/
+env/
 
-# Unit test / coverage reports
+# Environment variables
+.env
+
+# Data directory
+data/downloads/
+data/chroma_db/
+data/metadata.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
 htmlcov/
-.tox/
 .coverage
-.cache
-nosetests.xml
 coverage.xml
 
-# Translations
-*.mo
+# Streamlit
+.streamlit/
 
-# Mr Developer
-.mr.developer.cfg
-.project
-.pydevproject
-
-# Rope
-.ropeproject
-
-# Django stuff:
+# Misc
 *.log
-*.pot
-
-# Sphinx documentation
-docs/_build/
-
-# Jetbrains
-.idea/*

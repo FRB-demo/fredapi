@@ -1,0 +1,17 @@
+[
+  {
+    "question": "What was Wells Fargo's net income in Q4 2025?",
+    "expected_keywords": ["net income", "5.1 billion", "Q4 2025"],
+    "source": "wf_earnings"
+  },
+  {
+    "question": "What are Wells Fargo's key strategic priorities?",
+    "expected_keywords": ["strategic", "priorities"],
+    "source": "wf_annual_reports"
+  },
+  {
+    "question": "What was the total revenue reported?",
+    "expected_keywords": ["revenue"],
+    "source": "wf_earnings"
+  }
+]
