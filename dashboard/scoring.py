@@ -71,16 +71,14 @@ def normalize_percentile(series: pd.Series) -> pd.Series:
     )
 
 
-def normalize_zscore(series: pd.Series, window: int = 120) -> pd.Series:
+def normalize_zscore(series: pd.Series) -> pd.Series:
     """
-    Normalize a series to 0-1 scale using rolling z-score mapped through a sigmoid.
+    Normalize a series to 0-1 scale using expanding z-score mapped through a sigmoid.
 
     Parameters
     ----------
     series : pd.Series
         Input time series.
-    window : int
-        Rolling window size in periods (default 120 months = 10 years).
 
     Returns
     -------

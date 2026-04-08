@@ -15,7 +15,6 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from plotly.subplots import make_subplots
 
 # Ensure the repo root is on sys.path so we can import fredapi and dashboard modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -26,13 +25,13 @@ from dashboard.indicators import (  # noqa: E402
     RecessionIndicator,
     get_default_indicators,
     get_scored_indicators,
-    normalize_weights,
 )
 from dashboard.scoring import (  # noqa: E402
     build_indicator_summary,
     compute_composite_probability,
     compute_risk_score,
     normalize_percentile,
+    normalize_zscore,
     resample_to_monthly,
 )
 
@@ -266,7 +265,6 @@ for ind in scored_indicators:
     if "Percentile" in norm_method:
         normalized = normalize_percentile(monthly)
     else:
-        from dashboard.scoring import normalize_zscore
         normalized = normalize_zscore(monthly)
 
     # Compute risk score (flip if needed based on risk_direction)
@@ -334,6 +332,48 @@ else:
     st.warning("Insufficient data to compute composite recession probability.")
 
 # ---------------------------------------------------------------------------
+# Helper — recession shading
+# ---------------------------------------------------------------------------
+
+
+def _get_recession_periods(usrec_series: pd.Series) -> list[tuple]:
+    """Identify contiguous recession blocks from USREC series."""
+    if usrec_series.empty:
+        return []
+    rec_periods = usrec_series[usrec_series == 1]
+    if rec_periods.empty:
+        return []
+    rec_diff = rec_periods.index.to_series().diff().dt.days
+    starts = [rec_periods.index[0]]
+    ends: list = []
+    for j in range(1, len(rec_periods)):
+        if rec_diff.iloc[j] > 45:  # gap > 45 days = new recession
+            ends.append(rec_periods.index[j - 1])
+            starts.append(rec_periods.index[j])
+    ends.append(rec_periods.index[-1])
+    return list(zip(starts, ends))
+
+
+def _add_recession_shading(
+    fig: go.Figure,
+    usrec_series: pd.Series,
+    annotate_first: bool = False,
+) -> None:
+    """Add NBER recession shading rectangles to a plotly figure."""
+    periods = _get_recession_periods(usrec_series)
+    for i, (s, e) in enumerate(periods):
+        fig.add_vrect(
+            x0=s,
+            x1=e,
+            fillcolor="rgba(200,200,200,0.3)",
+            layer="below",
+            line_width=0,
+            annotation_text="Recession" if (annotate_first and i == 0) else None,
+            annotation_position="top left",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Composite probability time series
 # ---------------------------------------------------------------------------
 
@@ -343,28 +383,7 @@ if not composite.empty:
     fig_composite = go.Figure()
 
     # Recession shading
-    if not usrec.empty:
-        rec_periods = usrec[usrec == 1]
-        if not rec_periods.empty:
-            # Find contiguous recession blocks
-            rec_diff = rec_periods.index.to_series().diff().dt.days
-            starts = [rec_periods.index[0]]
-            ends = []
-            for j in range(1, len(rec_periods)):
-                if rec_diff.iloc[j] > 45:  # gap > 45 days = new recession
-                    ends.append(rec_periods.index[j - 1])
-                    starts.append(rec_periods.index[j])
-            ends.append(rec_periods.index[-1])
-
-            for s, e in zip(starts, ends):
-                fig_composite.add_vrect(
-                    x0=s, x1=e,
-                    fillcolor="rgba(200,200,200,0.3)",
-                    layer="below",
-                    line_width=0,
-                    annotation_text="Recession" if s == starts[0] else None,
-                    annotation_position="top left",
-                )
+    _add_recession_shading(fig_composite, usrec, annotate_first=True)
 
     fig_composite.add_trace(
         go.Scatter(
@@ -419,25 +438,7 @@ for row_start in range(0, len(scored), cols_per_row):
             fig = go.Figure()
 
             # Recession shading
-            if not usrec.empty:
-                rec_periods = usrec[usrec == 1]
-                if not rec_periods.empty:
-                    rec_diff = rec_periods.index.to_series().diff().dt.days
-                    starts = [rec_periods.index[0]]
-                    ends = []
-                    for j in range(1, len(rec_periods)):
-                        if rec_diff.iloc[j] > 45:
-                            ends.append(rec_periods.index[j - 1])
-                            starts.append(rec_periods.index[j])
-                    ends.append(rec_periods.index[-1])
-
-                    for s, e in zip(starts, ends):
-                        fig.add_vrect(
-                            x0=s, x1=e,
-                            fillcolor="rgba(200,200,200,0.3)",
-                            layer="below",
-                            line_width=0,
-                        )
+            _add_recession_shading(fig, usrec)
 
             fig.add_trace(
                 go.Scatter(
