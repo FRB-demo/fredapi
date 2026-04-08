@@ -331,6 +331,79 @@ this outputs:
   </tbody>
 </table>
 
+## Web Application
+
+This project includes a full-stack web application for exploring FRED data through a browser interface.
+
+### Prerequisites
+
+- Python 3.10+
+- Node.js 18+
+- A valid [FRED API key](https://fred.stlouisfed.org/docs/api/api_key.html)
+
+### Setting up the FRED API Key
+
+Set the `FRED_API_KEY` environment variable:
+
+```sh
+export FRED_API_KEY=your_api_key_here
+```
+
+Or copy `.env.example` to `.env` and fill in your key.
+
+### Running the Backend
+
+```sh
+cd backend
+pip install -r requirements.txt
+pip install -e ..  # install the fredapi package
+uvicorn backend.app:app --reload
+```
+
+The API will be available at `http://localhost:8000`. API docs at `http://localhost:8000/docs`.
+
+### Running the Frontend
+
+```sh
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend will be available at `http://localhost:5173` and proxies API requests to the backend.
+
+### API Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/search?q={text}` | Search for FRED series |
+| `GET /api/series/{id}` | Get series observations |
+| `GET /api/series/{id}/info` | Get series metadata |
+| `GET /api/series/{id}/releases` | Get revision history |
+| `GET /api/series/{id}/vintage-dates` | Get vintage dates |
+| `GET /api/series/{id}/as-of?date={date}` | Get data as known on a date |
+
+### Running Tests
+
+**Backend tests** (uses mocked data, no API key required):
+
+```sh
+pytest backend/tests/
+```
+
+**Frontend tests:**
+
+```sh
+cd frontend
+npm test
+```
+
+**Existing library tests:**
+
+```sh
+python -m pytest fredapi/tests/
+```
+
 ## Dependencies
 - [pandas](http://pandas.pydata.org/)
 
