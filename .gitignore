@@ -54,3 +54,10 @@ docs/_build/
 
 # Jetbrains
 .idea/*
+
+# Node
+node_modules/
+frontend/dist/
+
+# Environment
+.env
