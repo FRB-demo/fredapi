@@ -167,7 +167,10 @@ def _generate_current_response(summaries: dict) -> str:
         title = s.get("title", sid)
         latest = s.get("latest_value")
         date = s.get("latest_date", "")
-        parts.append(f"- **{title}** ({sid}): **{latest:,.2f}** as of {date}")
+        if latest is not None:
+            parts.append(f"- **{title}** ({sid}): **{latest:,.2f}** as of {date}")
+        else:
+            parts.append(f"- **{title}** ({sid}): **N/A** as of {date}")
 
     return "Here are the latest values:\n\n" + "\n".join(parts)
 
@@ -184,9 +187,10 @@ def _generate_extremes_response(summaries: dict) -> str:
         mx = s.get("max")
         latest = s.get("latest_value")
         if mn is not None and mx is not None:
+            current_str = f"{latest:,.2f}" if latest is not None else "N/A"
             parts.append(
                 f"- **{title}** ({sid}): Range from **{mn:,.2f}** to **{mx:,.2f}** "
-                f"(current: {latest:,.2f})"
+                f"(current: {current_str})"
             )
 
     return "Extremes analysis:\n\n" + "\n".join(parts)
@@ -227,10 +231,12 @@ def _generate_explanation(query: str, summaries: dict) -> str:
         for sid in series_ids:
             if sid in summaries:
                 s = summaries[sid]
-                parts.append(
-                    f"  - Latest: {s.get('latest_value', 'N/A'):,.2f} "
-                    f"(as of {s.get('latest_date', 'N/A')})"
-                )
+                latest_val = s.get('latest_value')
+                if latest_val is not None:
+                    parts.append(
+                        f"  - Latest: {latest_val:,.2f} "
+                        f"(as of {s.get('latest_date', 'N/A')})"
+                    )
 
     if parts:
         return "\n\n".join(parts)
@@ -323,8 +329,10 @@ def process_chat_message(message: str, context: Optional[list[dict]] = None) -> 
             items = list(summaries.values())
             parts = ["Here's a comparison of your loaded series:\n"]
             for s in items:
+                latest_val = s.get('latest_value')
+                latest_str = f"{latest_val:,.2f}" if isinstance(latest_val, (int, float)) else "N/A"
                 parts.append(
-                    f"- **{s['title']}**: Latest = {s.get('latest_value', 'N/A'):,.2f}, "
+                    f"- **{s['title']}**: Latest = {latest_str}, "
                     f"Trend = {s.get('recent_trend', 'N/A')}, "
                     f"Total Change = {s.get('pct_change_total', 'N/A')}%"
                 )
