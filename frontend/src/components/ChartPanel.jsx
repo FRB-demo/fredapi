@@ -234,13 +234,15 @@ export default function ChartPanel({ series, forecasts, chartType, dateRange }) 
             {/* Forecast confidence bands */}
             {forecasts.map(fc => {
               const matchedSeries = series.find(s => s.series_id === fc.series_id);
+              const matchedIndex = series.findIndex(s => s.series_id === fc.series_id);
               const color = matchedSeries?.color || '#94a3b8';
+              const fcYAxisId = useMultiAxis && matchedIndex === 1 ? 'right' : 'left';
               return (
                 <React.Fragment key={`forecast-${fc.series_id}`}>
                   <Area
                     dataKey={`${fc.series_id}_upper`}
                     name={`${fc.series_id} Upper`}
-                    yAxisId="left"
+                    yAxisId={fcYAxisId}
                     type="monotone"
                     stroke="none"
                     fill={color}
@@ -251,7 +253,7 @@ export default function ChartPanel({ series, forecasts, chartType, dateRange }) 
                   <Area
                     dataKey={`${fc.series_id}_lower`}
                     name={`${fc.series_id} Lower`}
-                    yAxisId="left"
+                    yAxisId={fcYAxisId}
                     type="monotone"
                     stroke="none"
                     fill="#ffffff"
@@ -262,7 +264,7 @@ export default function ChartPanel({ series, forecasts, chartType, dateRange }) 
                   <Line
                     dataKey={`${fc.series_id}_forecast`}
                     name={`${fc.series_id} Forecast (${fc.method})`}
-                    yAxisId="left"
+                    yAxisId={fcYAxisId}
                     type="monotone"
                     stroke={color}
                     strokeWidth={2}
