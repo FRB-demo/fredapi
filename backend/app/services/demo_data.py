@@ -6,6 +6,9 @@ from datetime import datetime, timedelta
 
 random.seed(42)
 
+# Cache generated demo data so repeated calls return the same series
+_demo_cache: dict[str, dict] = {}
+
 
 def _generate_monthly_dates(start_year=2015, end_year=2025):
     dates = []
@@ -260,23 +263,43 @@ DEMO_SERIES = {
 
 
 def get_demo_series(series_id, start_date=None, end_date=None):
-    """Generate demo data for a given series ID."""
-    config = DEMO_SERIES.get(series_id)
-    if not config:
-        # Generate generic data for unknown series
-        dates = _generate_monthly_dates()
-        values = _trend_with_noise(len(dates), 100, 120, noise=0.02)
-        title = series_id
-        units = ""
-        frequency = "Monthly"
-    else:
-        dates = config["dates_fn"]()
-        values = config["values_fn"](len(dates))
-        title = config["title"]
-        units = config["units"]
-        frequency = config["frequency"]
+    """Generate demo data for a given series ID.
+    
+    Results are cached so repeated calls with the same series_id return
+    identical data. Date filtering is applied after cache lookup.
+    """
+    # Check cache first for deterministic results
+    if series_id not in _demo_cache:
+        config = DEMO_SERIES.get(series_id)
+        if not config:
+            # Generate generic data for unknown series
+            dates = _generate_monthly_dates()
+            values = _trend_with_noise(len(dates), 100, 120, noise=0.02)
+            title = series_id
+            units = ""
+            frequency = "Monthly"
+        else:
+            dates = config["dates_fn"]()
+            values = config["values_fn"](len(dates))
+            title = config["title"]
+            units = config["units"]
+            frequency = config["frequency"]
 
-    # Apply date filters
+        _demo_cache[series_id] = {
+            "series_id": series_id,
+            "title": title,
+            "units": units,
+            "frequency": frequency,
+            "source": "FRED (Demo)",
+            "dates": list(dates),
+            "values": list(values),
+        }
+
+    # Return a copy with date filters applied
+    cached = _demo_cache[series_id]
+    dates = list(cached["dates"])
+    values = list(cached["values"])
+
     if start_date:
         filtered = [(d, v) for d, v in zip(dates, values) if d >= start_date]
         if filtered:
@@ -290,11 +313,11 @@ def get_demo_series(series_id, start_date=None, end_date=None):
             dates, values = list(dates), list(values)
 
     return {
-        "series_id": series_id,
-        "title": title,
-        "units": units,
-        "frequency": frequency,
-        "source": "FRED (Demo)",
+        "series_id": cached["series_id"],
+        "title": cached["title"],
+        "units": cached["units"],
+        "frequency": cached["frequency"],
+        "source": cached["source"],
         "dates": dates,
         "values": values,
     }

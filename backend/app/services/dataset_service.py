@@ -86,7 +86,10 @@ def get_dataset_series(dataset_id: str, date_col: str, value_col: str) -> dict:
     else:
         dates = dates_series.astype(str).tolist()
 
-    values = df[value_col].astype(float).tolist()
+    values_series = df[value_col].astype(float)
+    mask = values_series.notna()
+    dates = [d for d, m in zip(dates, mask) if m]
+    values = values_series[mask].tolist()
 
     return {
         "series_id": f"custom_{dataset_id}_{value_col}",
