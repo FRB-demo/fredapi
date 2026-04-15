@@ -286,8 +286,8 @@ export default function ChartPanel({ series, forecasts, chartType, dateRange }) 
             const vals = s.values || [];
             const latest = vals[vals.length - 1];
             const prev = vals.length > 1 ? vals[vals.length - 2] : null;
-            const change = prev ? latest - prev : null;
-            const pctChange = prev && prev !== 0 ? ((change / Math.abs(prev)) * 100) : null;
+            const change = prev !== null ? latest - prev : null;
+            const pctChange = change !== null && prev !== 0 ? ((change / Math.abs(prev)) * 100) : null;
 
             return (
               <div key={s.series_id} className="flex items-center gap-4 text-xs flex-shrink-0">
