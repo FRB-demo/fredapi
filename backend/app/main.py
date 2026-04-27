@@ -95,6 +95,9 @@ try:
     limiter = Limiter(key_func=get_remote_address, default_limits=[f"{settings.rate_limit_requests}/{settings.rate_limit_window} seconds"])
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+    from slowapi.middleware import SlowAPIMiddleware
+    app.add_middleware(SlowAPIMiddleware)
 except ImportError:
     logger.warning("slowapi not installed; rate limiting disabled")
 
