@@ -19,8 +19,10 @@ function mergeSeriesData(seriesList, forecasts) {
     (fc.forecast_dates || []).forEach((date, i) => {
       if (!dateMap[date]) dateMap[date] = { date };
       dateMap[date][`${fc.series_id}_forecast`] = fc.forecast_values[i];
-      if (fc.upper_bound) dateMap[date][`${fc.series_id}_upper`] = fc.upper_bound[i];
-      if (fc.lower_bound) dateMap[date][`${fc.series_id}_lower`] = fc.lower_bound[i];
+      // Store band as [lower, upper] tuple for Area baseValue rendering
+      if (fc.upper_bound && fc.lower_bound) {
+        dateMap[date][`${fc.series_id}_band`] = [fc.lower_bound[i], fc.upper_bound[i]];
+      }
     });
   });
 
@@ -239,7 +241,7 @@ export default function ChartPanel({ series, forecasts, chartType, dateRange }) 
             {/* Historical series */}
             {series.map((s, i) => renderSeries(s, i))}
 
-            {/* Forecast confidence bands */}
+            {/* Forecast confidence bands — rendered as a single Area with [lower, upper] range */}
             {forecasts.map(fc => {
               const matchedSeries = series.find(s => s.series_id === fc.series_id);
               const matchedIndex = series.findIndex(s => s.series_id === fc.series_id);
@@ -248,26 +250,17 @@ export default function ChartPanel({ series, forecasts, chartType, dateRange }) 
               return (
                 <React.Fragment key={`forecast-${fc.series_id}`}>
                   <Area
-                    dataKey={`${fc.series_id}_upper`}
-                    name={`${fc.series_id} Upper`}
+                    dataKey={`${fc.series_id}_band`}
+                    name={`${fc.series_id} CI`}
                     yAxisId={fcYAxisId}
                     type="monotone"
-                    stroke="none"
+                    stroke={color}
+                    strokeWidth={0}
                     fill={color}
-                    fillOpacity={0.08}
+                    fillOpacity={0.12}
                     connectNulls
                     legendType="none"
-                  />
-                  <Area
-                    dataKey={`${fc.series_id}_lower`}
-                    name={`${fc.series_id} Lower`}
-                    yAxisId={fcYAxisId}
-                    type="monotone"
-                    stroke="none"
-                    fill="#ffffff"
-                    fillOpacity={1}
-                    connectNulls
-                    legendType="none"
+                    isRange
                   />
                   <Line
                     dataKey={`${fc.series_id}_forecast`}

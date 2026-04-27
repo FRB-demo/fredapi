@@ -43,7 +43,7 @@ def _analyze_data_context(context: list[dict]) -> dict:
         if not values:
             continue
 
-        recent_values = values[-12:] if len(values) >= 12 else values
+        recent_values = [v for v in (values[-12:] if len(values) >= 12 else values) if v is not None]
         all_values = [v for v in values if v is not None]
 
         summary = {

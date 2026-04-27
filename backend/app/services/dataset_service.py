@@ -21,8 +21,10 @@ def parse_upload(file_content: bytes, filename: str) -> dict:
 
     if filename.endswith(".csv"):
         df = pd.read_csv(io.BytesIO(file_content))
-    elif filename.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(io.BytesIO(file_content), engine="openpyxl")  # S-5: explicit engine
+    elif filename.endswith(".xlsx"):
+        df = pd.read_excel(io.BytesIO(file_content), engine="openpyxl")
+    elif filename.endswith(".xls"):
+        df = pd.read_excel(io.BytesIO(file_content), engine="xlrd")
     else:
         raise ValueError(f"Unsupported file format: {filename}. Use CSV or Excel.")
 
@@ -37,14 +39,15 @@ def parse_upload(file_content: bytes, filename: str) -> dict:
         dtype = df[col].dtype
         if dtype == "object":
             # Ensure string columns don't contain formulas (formula injection)
-            sample = df[col].dropna().head(100)
-            for val in sample:
-                if isinstance(val, str) and val.startswith(("=", "+", "-", "@")):
-                    logger.warning("Potential formula injection in column %s", col)
-                    df[col] = df[col].apply(
-                        lambda x: x.lstrip("=+@-") if isinstance(x, str) else x
-                    )
-                    break
+            # Only sanitize truly dangerous formula prefixes (= and @)
+            # that spreadsheet software interprets as formulas.
+            # Do NOT strip - or + which are common in legitimate data.
+            df[col] = df[col].apply(
+                lambda x: (
+                    x.lstrip("=@") if isinstance(x, str) and x and x[0] in ("=", "@")
+                    else x
+                )
+            )
 
     # Auto-detect date columns
     date_col = None

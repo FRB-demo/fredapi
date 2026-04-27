@@ -92,7 +92,7 @@ try:
     from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
 
-    limiter = Limiter(key_func=get_remote_address, default_limits=[f"{settings.rate_limit_requests}/minute"])
+    limiter = Limiter(key_func=get_remote_address, default_limits=[f"{settings.rate_limit_requests}/{settings.rate_limit_window} seconds"])
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 except ImportError:
