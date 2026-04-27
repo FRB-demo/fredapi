@@ -115,25 +115,29 @@ async def get_series_data(
         return get_demo_series(series_id, start_date, end_date)
 
 
+def _local_search(query: str, limit: int = 20) -> list[dict]:
+    """Search the local popular series catalog."""
+    query_lower = query.lower()
+    results = []
+    for sid, info in POPULAR_SERIES.items():
+        if query_lower in sid.lower() or query_lower in info["title"].lower() or query_lower in info["category"].lower():
+            results.append({
+                "series_id": sid,
+                "title": info["title"],
+                "frequency": info["frequency"],
+                "units": info["units"],
+                "seasonal_adjustment": "",
+                "last_updated": "",
+                "popularity": 80,
+                "source": "FRED",
+            })
+    return results[:limit]
+
+
 async def search_series(query: str, limit: int = 20) -> list[dict]:
     """Search for FRED series by keyword."""
     if not settings.fred_api_key:
-        # Local search through popular series catalog
-        query_lower = query.lower()
-        results = []
-        for sid, info in POPULAR_SERIES.items():
-            if query_lower in sid.lower() or query_lower in info["title"].lower() or query_lower in info["category"].lower():
-                results.append({
-                    "series_id": sid,
-                    "title": info["title"],
-                    "frequency": info["frequency"],
-                    "units": info["units"],
-                    "seasonal_adjustment": "",
-                    "last_updated": "",
-                    "popularity": 80,
-                    "source": "FRED",
-                })
-        return results[:limit]
+        return _local_search(query, limit)
 
     try:
         params = {
@@ -147,6 +151,7 @@ async def search_series(query: str, limit: int = 20) -> list[dict]:
 
         client = _get_http_client()
         resp = await client.get(f"{FRED_BASE_URL}/series/search", params=params)
+        resp.raise_for_status()
         data = resp.json()
 
         results = []
@@ -163,11 +168,11 @@ async def search_series(query: str, limit: int = 20) -> list[dict]:
             })
         return results
     except httpx.HTTPError:
-        logger.exception("FRED search HTTP error")
-        return []
+        logger.exception("FRED search HTTP error; falling back to local catalog")
+        return _local_search(query, limit)
     except Exception:
-        logger.exception("FRED search error")
-        return []
+        logger.exception("FRED search error; falling back to local catalog")
+        return _local_search(query, limit)
 
 
 def get_popular_series() -> list[dict]:

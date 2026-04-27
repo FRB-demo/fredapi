@@ -79,7 +79,7 @@ CATALOG: list[Indicator] = [
     Indicator("JTSJOL", "Job Openings: Total Nonfarm", "Labor Market", "Monthly", "Thousands",
              aliases=("jobs", "employment", "job openings"), demo_start=5800, demo_end=8800, demo_noise=0.03),
     Indicator("ICSA", "Initial Jobless Claims", "Labor Market", "Weekly", "Number",
-             aliases=("jobs", "employment", "claims"), demo_start=220000, demo_end=210000, demo_noise=0.05),
+             aliases=("jobs", "employment", "claims"), demo_start=220000, demo_end=210000, demo_noise=0.05, demo_dates_type="daily"),
 
     # Interest Rates
     Indicator("FEDFUNDS", "Federal Funds Effective Rate", "Interest Rates", "Monthly", "Percent",

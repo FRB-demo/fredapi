@@ -47,7 +47,7 @@ export async function fetchSeries(seriesId, startDate, endDate) {
 export async function fetchMultiSeries(seriesList) {
   return request('/data/multi-series', {
     method: 'POST',
-    body: JSON.stringify({ series: seriesList }),
+    body: JSON.stringify({ series: seriesList.map(id => ({ series_id: id })) }),
   });
 }
 
