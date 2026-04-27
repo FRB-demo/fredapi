@@ -302,15 +302,13 @@ def get_demo_series(series_id, start_date=None, end_date=None):
 
     if start_date:
         filtered = [(d, v) for d, v in zip(dates, values) if d >= start_date]
-        if filtered:
-            dates, values = zip(*filtered)
-            dates, values = list(dates), list(values)
+        dates = [d for d, v in filtered]
+        values = [v for d, v in filtered]
 
     if end_date:
         filtered = [(d, v) for d, v in zip(dates, values) if d <= end_date]
-        if filtered:
-            dates, values = zip(*filtered)
-            dates, values = list(dates), list(values)
+        dates = [d for d, v in filtered]
+        values = [v for d, v in filtered]
 
     return {
         "series_id": cached["series_id"],
