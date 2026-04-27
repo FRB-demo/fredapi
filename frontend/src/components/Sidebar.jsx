@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { Search, Plus, X, ChevronDown, ChevronRight, TrendingUp, Calendar, BarChart2, LineChart, AreaChart } from 'lucide-react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { Search, Plus, X, ChevronDown, ChevronRight, TrendingUp, Calendar, BarChart2, LineChart, AreaChart, AlertCircle } from 'lucide-react'
 import { fetchPopularSeries, fetchSeries, searchSeries } from '../services/api'
 
 const CHART_TYPES = [
@@ -17,11 +17,13 @@ export default function Sidebar({ onAddSeries, activeSeries, onRemoveSeries, dat
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
   const [loadingSeries, setLoadingSeries] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const searchTimer = useRef(null);
 
   useEffect(() => {
+    setLoading(true);
     fetchPopularSeries().then(data => {
       setPopularSeries(data.series || []);
-      // Group by category
       const cats = {};
       (data.series || []).forEach(s => {
         const cat = s.category || 'Other';
@@ -29,17 +31,37 @@ export default function Sidebar({ onAddSeries, activeSeries, onRemoveSeries, dat
         cats[cat].push(s);
       });
       setCategories(cats);
-    }).catch(() => {});
+    }).catch(e => {
+      setLoadError('Failed to load indicators');
+    }).finally(() => setLoading(false));
+  }, []);
+
+  // P-10: Debounce search input
+  const debouncedSearch = useCallback((query) => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(async () => {
+      if (!query.trim()) { setSearchResults([]); return; }
+      setSearching(true);
+      try {
+        const data = await searchSeries(query);
+        setSearchResults(data.results || []);
+      } catch (e) {
+        setLoadError('Search failed');
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
   }, []);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     setSearching(true);
+    setLoadError('');
     try {
       const data = await searchSeries(searchQuery);
       setSearchResults(data.results || []);
     } catch (e) {
-      console.error('Search failed:', e);
+      setLoadError('Search failed');
     } finally {
       setSearching(false);
     }
@@ -72,7 +94,7 @@ export default function Sidebar({ onAddSeries, activeSeries, onRemoveSeries, dat
           <input
             type="text"
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={e => { setSearchQuery(e.target.value); debouncedSearch(e.target.value); }}
             onKeyDown={e => e.key === 'Enter' && handleSearch()}
             placeholder="Search indicators..."
             className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -155,6 +177,17 @@ export default function Sidebar({ onAddSeries, activeSeries, onRemoveSeries, dat
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* B-14: Loading/error states */}
+      {loadError && (
+        <div className="px-4 py-2 bg-red-50 border-b border-red-100 flex items-center gap-2 text-xs text-red-600">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+          {loadError}
+          <button onClick={() => setLoadError('')} className="ml-auto text-red-400 hover:text-red-600">
+            <X className="w-3 h-3" />
+          </button>
         </div>
       )}
 

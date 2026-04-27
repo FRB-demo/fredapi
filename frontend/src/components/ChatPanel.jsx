@@ -35,13 +35,19 @@ export default function ChatPanel({ activeSeries, onAddSeries, onClose }) {
     setLoading(true);
 
     try {
-      const context = activeSeries.map(s => ({
-        series_id: s.series_id,
-        title: s.title,
-        values: s.values,
-        dates: s.dates,
-        units: s.units,
-      }));
+      // P-9: Send only summary stats instead of full data arrays
+      const context = activeSeries.map(s => {
+        const vals = s.values || [];
+        const last50 = vals.slice(-50);
+        const last50dates = (s.dates || []).slice(-50);
+        return {
+          series_id: s.series_id,
+          title: s.title,
+          values: last50,
+          dates: last50dates,
+          units: s.units || '',
+        };
+      });
 
       const result = await sendChatMessage(userMessage, context);
 
@@ -85,7 +91,7 @@ export default function ChatPanel({ activeSeries, onAddSeries, onClose }) {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div key={`msg-${i}-${msg.role}`} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm ${
               msg.role === 'user'
                 ? 'bg-blue-600 text-white'
@@ -142,7 +148,7 @@ export default function ChatPanel({ activeSeries, onAddSeries, onClose }) {
           <div className="flex flex-wrap gap-1.5">
             {QUICK_PROMPTS.map((prompt, i) => (
               <button
-                key={i}
+                key={prompt}
                 onClick={() => { setInput(prompt); }}
                 className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-full text-xs text-slate-600 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 transition-colors"
               >

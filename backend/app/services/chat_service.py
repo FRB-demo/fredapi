@@ -5,48 +5,13 @@ LLM API keys. It parses user queries and returns relevant economic insights
 using the loaded data context.
 """
 
-import re
+import logging
 import statistics
-from datetime import datetime
 from typing import Optional
 
-from app.services.fred_service import POPULAR_SERIES, get_popular_series
+from app.indicators import POPULAR_SERIES, INDICATOR_ALIASES
 
-
-# Known economic indicators and their common names
-INDICATOR_ALIASES = {
-    "gdp": ["GDP", "GDPC1", "A191RL1Q225SBEA"],
-    "inflation": ["CPIAUCSL", "CPILFESL", "PCEPI", "PCEPILFE", "T10YIE"],
-    "cpi": ["CPIAUCSL", "CPILFESL"],
-    "pce": ["PCEPI", "PCEPILFE"],
-    "unemployment": ["UNRATE"],
-    "jobs": ["PAYEMS", "JTSJOL", "ICSA"],
-    "employment": ["PAYEMS", "JTSJOL", "ICSA"],
-    "nonfarm": ["PAYEMS"],
-    "payrolls": ["PAYEMS"],
-    "interest rate": ["FEDFUNDS", "DGS10", "DGS2"],
-    "fed funds": ["FEDFUNDS"],
-    "treasury": ["DGS10", "DGS2", "DFII10"],
-    "yield": ["DGS10", "DGS2", "T10Y2Y"],
-    "housing": ["HOUST", "PERMIT", "CSUSHPINSA", "MSPUS"],
-    "home price": ["CSUSHPINSA", "MSPUS"],
-    "housing starts": ["HOUST"],
-    "retail": ["RSAFS"],
-    "industrial": ["INDPRO"],
-    "consumer sentiment": ["UMCSENT"],
-    "oil": ["DCOILWTICO"],
-    "vix": ["VIXCLS"],
-    "stock": ["SP500", "NASDAQCOM"],
-    "s&p": ["SP500"],
-    "nasdaq": ["NASDAQCOM"],
-    "money supply": ["M2SL"],
-    "exchange rate": ["DEXUSEU"],
-    "breakeven": ["T10YIE"],
-    "tips": ["DFII10"],
-    "spread": ["T10Y2Y"],
-    "claims": ["ICSA"],
-    "job openings": ["JTSJOL"],
-}
+logger = logging.getLogger("econsight.chat")
 
 
 def _identify_series_from_query(query: str) -> list[str]:

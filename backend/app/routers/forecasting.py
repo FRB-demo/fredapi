@@ -1,13 +1,16 @@
 """API router for forecasting endpoints."""
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, HTTPException
 
 from app.models import ForecastRequest
 from app.services.fred_service import get_series_data
 from app.services.forecast_service import auto_forecast
-from app.services.dataset_service import get_dataset_series
+from app.services.dataset_service import get_dataset, get_dataset_series
+
+logger = logging.getLogger("econsight.forecast")
 
 router = APIRouter()
 
@@ -22,8 +25,6 @@ async def forecast(request: ForecastRequest):
             if len(parts) >= 3:
                 dataset_id = parts[1]
                 value_col = parts[2]
-                # We need date_col info - for now use the stored dataset
-                from app.services.dataset_service import get_dataset
                 ds = get_dataset(dataset_id)
                 if ds and ds.get("date_column"):
                     series_data = get_dataset_series(dataset_id, ds["date_column"], value_col)
@@ -54,5 +55,6 @@ async def forecast(request: ForecastRequest):
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Forecast error: {str(e)}")
+    except Exception:
+        logger.exception("Forecast error for series %s", request.series_id)
+        raise HTTPException(status_code=500, detail="Forecast computation failed")

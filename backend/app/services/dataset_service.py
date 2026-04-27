@@ -1,9 +1,15 @@
 """Service for managing user-uploaded datasets."""
 
 import io
+import logging
 import uuid
+
 import pandas as pd
 from typing import Optional
+
+from app.config import settings
+
+logger = logging.getLogger("econsight.datasets")
 
 # In-memory dataset store (in production, use a database)
 _datasets: dict[str, dict] = {}
@@ -11,14 +17,34 @@ _datasets: dict[str, dict] = {}
 
 def parse_upload(file_content: bytes, filename: str) -> dict:
     """Parse an uploaded CSV or Excel file into a dataset."""
-    dataset_id = str(uuid.uuid4())[:8]
+    dataset_id = str(uuid.uuid4())  # S-6: Use full UUID
 
     if filename.endswith(".csv"):
         df = pd.read_csv(io.BytesIO(file_content))
     elif filename.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(io.BytesIO(file_content))
+        df = pd.read_excel(io.BytesIO(file_content), engine="openpyxl")  # S-5: explicit engine
     else:
         raise ValueError(f"Unsupported file format: {filename}. Use CSV or Excel.")
+
+    # P-6: Enforce row/column limits
+    if len(df) > settings.max_dataset_rows:
+        raise ValueError(f"Dataset exceeds maximum of {settings.max_dataset_rows:,} rows")
+    if len(df.columns) > settings.max_dataset_columns:
+        raise ValueError(f"Dataset exceeds maximum of {settings.max_dataset_columns} columns")
+
+    # S-5: Validate that DataFrame contains only expected data types
+    for col in df.columns:
+        dtype = df[col].dtype
+        if dtype == "object":
+            # Ensure string columns don't contain formulas (formula injection)
+            sample = df[col].dropna().head(100)
+            for val in sample:
+                if isinstance(val, str) and val.startswith(("=", "+", "-", "@")):
+                    logger.warning("Potential formula injection in column %s", col)
+                    df[col] = df[col].apply(
+                        lambda x: x.lstrip("=+@-") if isinstance(x, str) else x
+                    )
+                    break
 
     # Auto-detect date columns
     date_col = None
@@ -28,7 +54,7 @@ def parse_upload(file_content: bytes, filename: str) -> dict:
                 pd.to_datetime(df[col].head(5))
                 date_col = col
                 break
-            except Exception:
+            except (ValueError, TypeError):
                 continue
 
     if date_col:

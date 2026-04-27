@@ -1,16 +1,24 @@
 """Service for fetching data from FRED (Federal Reserve Economic Data)."""
 
 import asyncio
-import os
-import httpx
-import pandas as pd
+import logging
 from typing import Optional
 
-FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
+import httpx
+from cachetools import TTLCache
+
+from app.config import settings
+from app.indicators import POPULAR_SERIES
+
+logger = logging.getLogger("econsight.fred")
+
 FRED_BASE_URL = "https://api.stlouisfed.org/fred"
 
-# Shared HTTP client for connection pooling and reuse
+# Shared HTTP client for connection pooling and reuse (P-1)
 _http_client: httpx.AsyncClient | None = None
+
+# TTL cache for FRED API responses (P-3)
+_series_cache: TTLCache = TTLCache(maxsize=settings.fred_cache_maxsize, ttl=settings.fred_cache_ttl)
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -20,39 +28,14 @@ def _get_http_client() -> httpx.AsyncClient:
         _http_client = httpx.AsyncClient(timeout=30.0)
     return _http_client
 
-# Popular economic series catalog
-POPULAR_SERIES = {
-    "GDP": {"title": "Gross Domestic Product", "category": "National Accounts", "frequency": "Quarterly", "units": "Billions of Dollars"},
-    "GDPC1": {"title": "Real Gross Domestic Product", "category": "National Accounts", "frequency": "Quarterly", "units": "Billions of Chained 2017 Dollars"},
-    "CPIAUCSL": {"title": "Consumer Price Index (All Urban)", "category": "Prices", "frequency": "Monthly", "units": "Index 1982-1984=100"},
-    "CPILFESL": {"title": "Core CPI (Less Food & Energy)", "category": "Prices", "frequency": "Monthly", "units": "Index 1982-1984=100"},
-    "PCEPI": {"title": "PCE Price Index", "category": "Prices", "frequency": "Monthly", "units": "Index 2017=100"},
-    "PCEPILFE": {"title": "Core PCE Price Index", "category": "Prices", "frequency": "Monthly", "units": "Index 2017=100"},
-    "UNRATE": {"title": "Unemployment Rate", "category": "Labor Market", "frequency": "Monthly", "units": "Percent"},
-    "PAYEMS": {"title": "Total Nonfarm Payrolls", "category": "Labor Market", "frequency": "Monthly", "units": "Thousands of Persons"},
-    "FEDFUNDS": {"title": "Federal Funds Effective Rate", "category": "Interest Rates", "frequency": "Monthly", "units": "Percent"},
-    "DGS10": {"title": "10-Year Treasury Constant Maturity Rate", "category": "Interest Rates", "frequency": "Daily", "units": "Percent"},
-    "DGS2": {"title": "2-Year Treasury Constant Maturity Rate", "category": "Interest Rates", "frequency": "Daily", "units": "Percent"},
-    "T10Y2Y": {"title": "10-Year Minus 2-Year Treasury Spread", "category": "Interest Rates", "frequency": "Daily", "units": "Percent"},
-    "DEXUSEU": {"title": "USD/EUR Exchange Rate", "category": "Exchange Rates", "frequency": "Daily", "units": "USD per EUR"},
-    "VIXCLS": {"title": "CBOE Volatility Index (VIX)", "category": "Financial Markets", "frequency": "Daily", "units": "Index"},
-    "SP500": {"title": "S&P 500 Index", "category": "Financial Markets", "frequency": "Daily", "units": "Index"},
-    "M2SL": {"title": "M2 Money Supply", "category": "Money Supply", "frequency": "Monthly", "units": "Billions of Dollars"},
-    "HOUST": {"title": "Housing Starts", "category": "Housing", "frequency": "Monthly", "units": "Thousands of Units"},
-    "PERMIT": {"title": "Building Permits", "category": "Housing", "frequency": "Monthly", "units": "Thousands of Units"},
-    "CSUSHPINSA": {"title": "Case-Shiller Home Price Index (National)", "category": "Housing", "frequency": "Monthly", "units": "Index Jan 2000=100"},
-    "MSPUS": {"title": "Median Sales Price of Houses Sold", "category": "Housing", "frequency": "Quarterly", "units": "Dollars"},
-    "RSAFS": {"title": "Retail Sales: Total", "category": "Consumer Spending", "frequency": "Monthly", "units": "Millions of Dollars"},
-    "INDPRO": {"title": "Industrial Production Index", "category": "Production", "frequency": "Monthly", "units": "Index 2017=100"},
-    "UMCSENT": {"title": "Consumer Sentiment (U of Michigan)", "category": "Surveys", "frequency": "Monthly", "units": "Index 1966:Q1=100"},
-    "DCOILWTICO": {"title": "Crude Oil Price: WTI", "category": "Commodities", "frequency": "Daily", "units": "Dollars per Barrel"},
-    "NASDAQCOM": {"title": "NASDAQ Composite Index", "category": "Financial Markets", "frequency": "Daily", "units": "Index"},
-    "A191RL1Q225SBEA": {"title": "Real GDP Growth Rate", "category": "National Accounts", "frequency": "Quarterly", "units": "Percent Change"},
-    "DFII10": {"title": "10-Year TIPS Rate", "category": "Interest Rates", "frequency": "Daily", "units": "Percent"},
-    "T10YIE": {"title": "10-Year Breakeven Inflation Rate", "category": "Prices", "frequency": "Daily", "units": "Percent"},
-    "JTSJOL": {"title": "Job Openings: Total Nonfarm", "category": "Labor Market", "frequency": "Monthly", "units": "Thousands"},
-    "ICSA": {"title": "Initial Jobless Claims", "category": "Labor Market", "frequency": "Weekly", "units": "Number"},
-}
+
+def _sanitize_error(error: Exception) -> str:
+    """S-4: Sanitize exception messages to avoid leaking the API key."""
+    msg = str(error)
+    api_key = settings.fred_api_key
+    if api_key and api_key in msg:
+        msg = msg.replace(api_key, "***")
+    return msg
 
 
 async def get_series_data(
@@ -63,13 +46,19 @@ async def get_series_data(
     """Fetch a single series from FRED API, falling back to demo data if no API key."""
     from app.services.demo_data import get_demo_series
 
-    if not FRED_API_KEY:
+    if not settings.fred_api_key:
         return get_demo_series(series_id, start_date, end_date)
+
+    # P-3: Check cache first
+    cache_key = (series_id, start_date, end_date)
+    if cache_key in _series_cache:
+        logger.debug("Cache hit for %s", series_id)
+        return _series_cache[cache_key]
 
     try:
         params = {
             "series_id": series_id,
-            "api_key": FRED_API_KEY,
+            "api_key": settings.fred_api_key,
             "file_type": "json",
         }
         if start_date:
@@ -81,7 +70,7 @@ async def get_series_data(
         info_resp, obs_resp = await asyncio.gather(
             client.get(f"{FRED_BASE_URL}/series", params={
                 "series_id": series_id,
-                "api_key": FRED_API_KEY,
+                "api_key": settings.fred_api_key,
                 "file_type": "json",
             }),
             client.get(f"{FRED_BASE_URL}/series/observations", params=params),
@@ -102,7 +91,7 @@ async def get_series_data(
         units = series_info.get("units", "")
         frequency = series_info.get("frequency", "")
 
-        return {
+        result = {
             "series_id": series_id,
             "title": title,
             "units": units,
@@ -111,13 +100,22 @@ async def get_series_data(
             "dates": dates,
             "values": values,
         }
-    except Exception:
+
+        # P-3: Cache the result
+        _series_cache[cache_key] = result
+        return result
+
+    except httpx.HTTPError as e:
+        logger.warning("FRED API HTTP error for %s: %s", series_id, _sanitize_error(e))
+        return get_demo_series(series_id, start_date, end_date)
+    except Exception as e:
+        logger.warning("FRED API error for %s: %s", series_id, _sanitize_error(e))
         return get_demo_series(series_id, start_date, end_date)
 
 
 async def search_series(query: str, limit: int = 20) -> list[dict]:
     """Search for FRED series by keyword."""
-    if not FRED_API_KEY:
+    if not settings.fred_api_key:
         # Local search through popular series catalog
         query_lower = query.lower()
         results = []
@@ -138,7 +136,7 @@ async def search_series(query: str, limit: int = 20) -> list[dict]:
     try:
         params = {
             "search_text": query,
-            "api_key": FRED_API_KEY,
+            "api_key": settings.fred_api_key,
             "file_type": "json",
             "limit": limit,
             "order_by": "popularity",
@@ -162,7 +160,11 @@ async def search_series(query: str, limit: int = 20) -> list[dict]:
                 "source": "FRED",
             })
         return results
+    except httpx.HTTPError:
+        logger.exception("FRED search HTTP error")
+        return []
     except Exception:
+        logger.exception("FRED search error")
         return []
 
 

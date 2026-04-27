@@ -1,12 +1,15 @@
 """Forecasting service using statsmodels for time-series forecasting."""
 
+import logging
+
 import numpy as np
 import pandas as pd
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.arima.model import ARIMA
-from statsmodels.tsa.stattools import adfuller
 from scipy import stats
 from typing import Optional
+
+logger = logging.getLogger("econsight.forecast")
 
 
 def _prepare_series(dates: list[str], values: list[float]) -> pd.Series:
@@ -25,7 +28,7 @@ def _infer_frequency(series: pd.Series) -> str:
     diffs = pd.Series(series.index).diff().dropna()
     median_diff = diffs.median().days
     if median_diff <= 2:
-        return "B"  # Business daily
+        return "B"
     elif median_diff <= 8:
         return "W"
     elif median_diff <= 35:
@@ -42,7 +45,8 @@ def _resample_if_needed(series: pd.Series, freq: str) -> pd.Series:
         resampled = series.resample(freq).last()
         resampled = resampled.ffill()
         return resampled
-    except Exception:
+    except (ValueError, TypeError):
+        logger.debug("Resample failed for freq=%s, using original series", freq)
         return series
 
 
@@ -184,16 +188,21 @@ def auto_forecast(
         raise ValueError("Need at least 5 data points to forecast")
 
     if method == "auto":
-        # Try Holt-Winters first, fall back to ARIMA, then linear
+        # B-16: Try methods in order and track attempts
         methods = [
             ("holt_winters", lambda: forecast_holt_winters(series, periods, confidence_level)),
             ("arima", lambda: forecast_arima(series, periods, confidence_level)),
             ("linear", lambda: forecast_linear_trend(series, periods, confidence_level)),
         ]
+        attempted: list[str] = []
         for name, fn in methods:
             try:
-                return fn()
-            except Exception:
+                result = fn()
+                result["attempted_methods"] = attempted + [f"{name}: success"]
+                return result
+            except Exception as e:
+                attempted.append(f"{name}: {e}")
+                logger.debug("Auto forecast: %s failed: %s", name, e)
                 continue
         raise ValueError("All forecasting methods failed")
 
