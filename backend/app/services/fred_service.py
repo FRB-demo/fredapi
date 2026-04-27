@@ -1,5 +1,6 @@
 """Service for fetching data from FRED (Federal Reserve Economic Data)."""
 
+import asyncio
 import os
 import httpx
 import pandas as pd
@@ -7,6 +8,17 @@ from typing import Optional
 
 FRED_API_KEY = os.environ.get("FRED_API_KEY", "")
 FRED_BASE_URL = "https://api.stlouisfed.org/fred"
+
+# Shared HTTP client for connection pooling and reuse
+_http_client: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Get or create the shared HTTP client."""
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(timeout=30.0)
+    return _http_client
 
 # Popular economic series catalog
 POPULAR_SERIES = {
@@ -65,17 +77,18 @@ async def get_series_data(
         if end_date:
             params["observation_end"] = end_date
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            info_resp = await client.get(f"{FRED_BASE_URL}/series", params={
+        client = _get_http_client()
+        info_resp, obs_resp = await asyncio.gather(
+            client.get(f"{FRED_BASE_URL}/series", params={
                 "series_id": series_id,
                 "api_key": FRED_API_KEY,
                 "file_type": "json",
-            })
-            info_data = info_resp.json()
-            series_info = info_data.get("seriess", [{}])[0] if info_data.get("seriess") else {}
-
-            obs_resp = await client.get(f"{FRED_BASE_URL}/series/observations", params=params)
-            obs_data = obs_resp.json()
+            }),
+            client.get(f"{FRED_BASE_URL}/series/observations", params=params),
+        )
+        info_data = info_resp.json()
+        series_info = info_data.get("seriess", [{}])[0] if info_data.get("seriess") else {}
+        obs_data = obs_resp.json()
 
         observations = obs_data.get("observations", [])
         dates = []
@@ -132,9 +145,9 @@ async def search_series(query: str, limit: int = 20) -> list[dict]:
             "sort_order": "desc",
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(f"{FRED_BASE_URL}/series/search", params=params)
-            data = resp.json()
+        client = _get_http_client()
+        resp = await client.get(f"{FRED_BASE_URL}/series/search", params=params)
+        data = resp.json()
 
         results = []
         for s in data.get("seriess", []):

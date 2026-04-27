@@ -1,5 +1,7 @@
 """API router for forecasting endpoints."""
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 
 from app.models import ForecastRequest
@@ -34,7 +36,8 @@ async def forecast(request: ForecastRequest):
                 request.series_id, request.start_date, request.end_date
             )
 
-        result = auto_forecast(
+        result = await asyncio.to_thread(
+            auto_forecast,
             dates=series_data["dates"],
             values=series_data["values"],
             periods=request.periods,

@@ -60,7 +60,15 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 export default function ChartPanel({ series, forecasts, chartType, dateRange }) {
-  const chartData = useMemo(() => mergeSeriesData(series, forecasts), [series, forecasts]);
+  const chartData = useMemo(() => {
+    const merged = mergeSeriesData(series, forecasts);
+    if (!dateRange?.start && !dateRange?.end) return merged;
+    return merged.filter(d => {
+      if (dateRange.start && d.date < dateRange.start) return false;
+      if (dateRange.end && d.date > dateRange.end) return false;
+      return true;
+    });
+  }, [series, forecasts, dateRange]);
 
   // Find the boundary between historical and forecast data
   const lastHistoricalDate = useMemo(() => {

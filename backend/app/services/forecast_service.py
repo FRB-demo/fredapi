@@ -185,9 +185,14 @@ def auto_forecast(
 
     if method == "auto":
         # Try Holt-Winters first, fall back to ARIMA, then linear
-        for m in ["holt_winters", "arima", "linear"]:
+        methods = [
+            ("holt_winters", lambda: forecast_holt_winters(series, periods, confidence_level)),
+            ("arima", lambda: forecast_arima(series, periods, confidence_level)),
+            ("linear", lambda: forecast_linear_trend(series, periods, confidence_level)),
+        ]
+        for name, fn in methods:
             try:
-                return auto_forecast(dates, values, periods, m, confidence_level)
+                return fn()
             except Exception:
                 continue
         raise ValueError("All forecasting methods failed")
