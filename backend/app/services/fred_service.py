@@ -75,6 +75,8 @@ async def get_series_data(
             }),
             client.get(f"{FRED_BASE_URL}/series/observations", params=params),
         )
+        info_resp.raise_for_status()
+        obs_resp.raise_for_status()
         info_data = info_resp.json()
         series_info = info_data.get("seriess", [{}])[0] if info_data.get("seriess") else {}
         obs_data = obs_resp.json()

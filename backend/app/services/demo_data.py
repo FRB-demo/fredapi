@@ -61,7 +61,7 @@ def _generate_daily_dates(start_year: int = 2020, end_year: int = 2025) -> list[
 
 def _make_rng(series_id: str) -> random.Random:
     """Create a per-series seeded RNG for fully deterministic generation."""
-    return random.Random(hash(series_id) + 42)
+    return random.Random(f"econsight_{series_id}_42")
 
 
 def _trend_with_noise(
