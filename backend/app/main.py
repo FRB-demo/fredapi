@@ -5,9 +5,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-from app.routers import data, forecasting, chat, datasets
-
 load_dotenv()
+
+from app.routers import data, forecasting, chat, datasets
 
 app = FastAPI(
     title="EconSight - Economic Research Platform",

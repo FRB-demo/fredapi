@@ -331,10 +331,12 @@ def process_chat_message(message: str, context: Optional[list[dict]] = None) -> 
             for s in items:
                 latest_val = s.get('latest_value')
                 latest_str = f"{latest_val:,.2f}" if isinstance(latest_val, (int, float)) else "N/A"
+                pct = s.get('pct_change_total')
+                pct_str = f"{pct:.2f}%" if pct is not None else "N/A"
                 parts.append(
                     f"- **{s['title']}**: Latest = {latest_str}, "
                     f"Trend = {s.get('recent_trend', 'N/A')}, "
-                    f"Total Change = {s.get('pct_change_total', 'N/A')}%"
+                    f"Total Change = {pct_str}"
                 )
             response = "\n".join(parts)
         else:
