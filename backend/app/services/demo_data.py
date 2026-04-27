@@ -17,9 +17,6 @@ from app.indicators import CATALOG, CATALOG_BY_ID
 
 logger = logging.getLogger("econsight.demo")
 
-# P-5: Dedicated Random instance to avoid polluting global state
-_rng = random.Random(42)
-
 # P-4: LRU-style cache with size cap
 _demo_cache: OrderedDict[str, dict] = OrderedDict()
 _CACHE_MAX = settings.demo_cache_maxsize
@@ -62,7 +59,13 @@ def _generate_daily_dates(start_year: int = 2020, end_year: int = 2025) -> list[
     return dates
 
 
+def _make_rng(series_id: str) -> random.Random:
+    """Create a per-series seeded RNG for fully deterministic generation."""
+    return random.Random(hash(series_id) + 42)
+
+
 def _trend_with_noise(
+    rng: random.Random,
     n: int,
     start: float,
     end: float,
@@ -79,7 +82,7 @@ def _trend_with_noise(
         t = i / max(n - 1, 1)
         base = start + (end - start) * t
         seasonal = seasonal_amp * math.sin(2 * math.pi * i / seasonal_period) if seasonal_period > 0 else 0
-        noise_val = _rng.gauss(0, abs(base) * noise)
+        noise_val = rng.gauss(0, abs(base) * noise)
         v = base + seasonal + noise_val
         if clamp_min is not None:
             v = max(clamp_min, v)
@@ -91,6 +94,7 @@ def _trend_with_noise(
 
 def _generate_from_indicator(ind) -> tuple[list[str], list[float]]:
     """Generate dates and values from an Indicator definition."""
+    rng = _make_rng(ind.series_id)
     if ind.demo_dates_type == "quarterly":
         dates = _generate_quarterly_dates()
     elif ind.demo_dates_type == "daily":
@@ -99,6 +103,7 @@ def _generate_from_indicator(ind) -> tuple[list[str], list[float]]:
         dates = _generate_monthly_dates()
 
     values = _trend_with_noise(
+        rng,
         len(dates),
         ind.demo_start,
         ind.demo_end,
@@ -132,8 +137,9 @@ def get_demo_series(
         else:
             # P-4: Only cache known series; unknown series get generic data
             logger.debug("Generating generic demo data for unknown series: %s", series_id)
+            rng = _make_rng(series_id)
             dates = _generate_monthly_dates()
-            values = _trend_with_noise(len(dates), 100, 120, noise=0.02)
+            values = _trend_with_noise(rng, len(dates), 100, 120, noise=0.02)
             title = series_id
             units = ""
             frequency = "Monthly"
