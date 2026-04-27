@@ -2,6 +2,7 @@
 
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -68,10 +69,22 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application startup and shutdown."""
+    yield
+    # Cleanup: close shared httpx client on shutdown
+    from app.services.fred_service import _http_client
+    if _http_client and not _http_client.is_closed:
+        await _http_client.aclose()
+        logger.info("Closed shared HTTP client")
+
+
 app = FastAPI(
     title="EconSight - Economic Research Platform",
     description="Interactive economic research and forecasting platform",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Middleware (applied in reverse order)

@@ -13,8 +13,8 @@ const API_BASE = '/api';
  */
 async function request(url, options = {}) {
   const res = await fetch(`${API_BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,
+    headers: { 'Content-Type': 'application/json', ...options.headers },
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));

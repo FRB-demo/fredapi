@@ -52,7 +52,7 @@ async def upload_dataset(file: UploadFile = File(...)):
 
     # S-3: Validate content type
     if file.content_type and file.content_type not in ALLOWED_CONTENT_TYPES:
-        logger.warning("Unexpected content type: %s for file %s", file.content_type, file.filename)
+        raise HTTPException(status_code=400, detail=f"Unsupported content type: {file.content_type}")
 
     # S-3: Sanitize filename
     safe_filename = _sanitize_filename(file.filename)

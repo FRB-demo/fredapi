@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import Header from './components/Header'
 import Sidebar from './components/Sidebar'
 import ChartPanel from './components/ChartPanel'
@@ -19,6 +19,14 @@ export default function App() {
   const [showForecast, setShowForecast] = useState(false);
   const [forecasts, setForecasts] = useState([]);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const [demoMode, setDemoMode] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/health')
+      .then(r => r.json())
+      .then(d => { if (d.data_mode === 'demo') setDemoMode(true); })
+      .catch(() => {});
+  }, []);
 
   const addSeries = useCallback((series) => {
     setActiveSeries(prev => {
@@ -46,6 +54,11 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col bg-slate-50">
+      {demoMode && (
+        <div className="bg-amber-100 border-b border-amber-300 text-amber-800 text-sm text-center py-1.5 px-4 font-medium">
+          Demo Mode — Showing Synthetic Data. Set a FRED API key for live data.
+        </div>
+      )}
       <Header
         showChat={showChat}
         setShowChat={setShowChat}
